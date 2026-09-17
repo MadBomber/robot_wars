@@ -8,10 +8,10 @@ module RobotWars
   # rather than just distinguishing mine/theirs, and the report says how
   # many warriors remain and who they are.
   class SensingReport
-    # attack_outcome: :hit or :miss when the robot attacked last turn
-    # (see TurnResolver::Report#attack_outcome_for), nil otherwise —
-    # Battleship-style feedback, the one thing an attacker learns about
-    # where its rivals are.
+    # attack_outcome: :hit, :miss, or :off_board when the robot attacked
+    # last turn (see TurnResolver::Report#attack_outcome_for), nil
+    # otherwise — Battleship-style feedback, the one thing an attacker
+    # learns about where its rivals are.
     def initialize(game:, robot:, attack_outcome: nil)
       @game = game
       @robot = robot
@@ -31,7 +31,10 @@ module RobotWars
     private
 
     def attack_feedback_text
-      @attack_outcome && "Your attack last turn was a #{@attack_outcome.to_s.upcase}."
+      case @attack_outcome
+      when :hit, :miss then "Your attack last turn was a #{@attack_outcome.to_s.upcase}."
+      when :off_board  then "Your attack last turn was OFF THE BOARD and cost you half its committed points."
+      end
     end
 
     def position_text

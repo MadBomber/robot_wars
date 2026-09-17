@@ -22,6 +22,8 @@ require_relative "robot_wars/game_rules"
 require_relative "robot_wars/sensing_report"
 require_relative "robot_wars/warrior"
 require_relative "robot_wars/llm_pilot"
+require_relative "robot_wars/say_speaker"
+require_relative "robot_wars/announcer"
 
 module RobotWars
   # Raised for RobotWars-specific misuse.

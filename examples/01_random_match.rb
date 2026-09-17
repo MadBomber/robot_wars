@@ -15,6 +15,9 @@ ENV["BUNDLE_GEMFILE"] = File.expand_path(ENV["BUNDLE_GEMFILE"] || "Gemfile.local
 require "bundler/setup"
 require "robot_wars"
 
+# Turn lines should land as they're printed, even into a pipe or file.
+$stdout.sync = true
+
 BOARD      = RobotWars::Board.new(width: 8, height: 8)
 ROBOT_IDS  = %w[alpha bravo charlie delta].freeze
 

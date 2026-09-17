@@ -1,8 +1,11 @@
 # RobotWars — Core Rules
 
-Numbered for reference. All rules below are decided (proposed defaults
+Numbered for reference. Rules 1–40 are decided (proposed defaults
 approved by Dewayne 2026-09-16). Two sensing details remain open under
-rule 35. See `notes.md` for the discussion history behind each rule.
+rule 35. Rules 41–46 were added 2026-09-17 (41–42 documenting behavior
+already implemented at Dewayne's direction; 43–46 and the rule 18
+amendment ruled by Dewayne 2026-09-17). See `notes.md` for the
+discussion history behind each rule.
 
 ## Board and Setup
 
@@ -41,7 +44,10 @@ rule 35. See `notes.md` for the discussion history behind each rule.
     square ends the turn unowned.
 17. Every robot that does not win returns to the square it came from.
 18. If a returning robot finds another robot in its origin square, a
-    second conflict is resolved there under the same rules.
+    second conflict is resolved there under the same rules. If the
+    origin square has instead become owned by another robot, there is
+    no second conflict: the returner cannot enter (rule 24) and is
+    displaced under rule 19, or dies under rule 20.
 19. A robot that loses a second conflict in the same resolution is
     placed on an available adjacent square: one of the 8 neighboring
     squares that is unoccupied and not owned by another robot.
@@ -119,3 +125,49 @@ rule 35. See `notes.md` for the discussion history behind each rule.
        positions (rules 26–32).
     5. Deaths are processed; owned squares of the dead are released.
     6. Occupation streaks are updated; ownership by occupation vests.
+
+## Pilot Errors
+
+41. A robot whose pilot produces no parseable action for a turn (for
+    example, an LLM reply that matches none of the four commands) is
+    treated as having attempted an illegal move: it suffers rule 21's
+    solo conflict — a random 1–10 hit — and stays where it was.
+
+## Attack Feedback
+
+42. An attacker is told, in its next sensing report, whether its ranged
+    attack was a HIT (a robot was on the target square) or a MISS (the
+    square was empty) — Battleship style. The feedback names no robot
+    and no square beyond the one the attacker itself chose. Counter-fire
+    received and the bracing premium produce no such feedback. This is
+    the only information beyond rule 33's ownership map that ever
+    reveals anything about robot positions.
+
+## Commitment Limits
+
+43. Committing more points than the robot's current life — as an
+    attack's strength (rule 26) or a defense (rule 29) — is a pilot
+    error: the action is invalid and is punished as rule 41's solo
+    conflict. Life is measured at declaration time, before any of the
+    turn's effects.
+
+## Off-Board Attacks
+
+44. A ranged attack aimed at a square that is not on the board hits
+    nothing and costs the attacker half the committed points, rounded
+    up.
+
+## Brain-Dead Pilots
+
+45. A pilot that fails to produce its action within the match's time
+    limit is brain dead: its robot dies on the spot and is removed
+    from the match, and its squares are released (rule 25). The match
+    never waits on a hung brain.
+
+## Dead Robots
+
+46. A dead robot takes no further part in the turn: it fights no
+    further conflicts, wins no squares, and its declared attack or
+    defense does not resolve. A robot dead at the moment it would win
+    a conflict wins nothing. Deaths within a single resolution step
+    remain simultaneous (rule 38).

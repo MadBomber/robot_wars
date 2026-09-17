@@ -23,8 +23,9 @@ design discussion behind each rule is logged in `notes.md`.
 > runs full matches turn by turn — movement, the life-point economy,
 > square conflicts (including cascading returns and displacement-or-death),
 > ranged combat, death processing, and territory — end to end, with no
-> graphics. Still missing: the turn-event stream for phase 2 to consume,
-> and a CLI/example runner.
+> graphics. The `rwars` CLI and an example runner exist (below). Still
+> missing: the structured turn-event stream for phase 2 (the browser
+> spectator view) to consume.
 
 ```ruby
 board = RobotWars::Board.new(width: 10, height: 10)
@@ -63,7 +64,7 @@ that ship outside ruby_llm (as `ruby_llm-providers-<name>` gems) are
 required on demand, and a template that names no model falls through to
 RobotLab's config cascade.
 
-The example warriors in `examples/warriors/` all pick **Apfel** —
+Most of the example warriors in `examples/warriors/` pick **Apfel** —
 Apple's on-device Foundation Model, served locally by the `apfel` CLI.
 No API key, no cloud calls, no per-token cost:
 
@@ -90,18 +91,30 @@ ATTACK <x>,<y> <points>
 DEFEND <points>
 ```
 
-A reply that doesn't parse is treated as an illegal-move-style penalty
-(RULES.md 21) rather than crashing the match. Run `bin/rwars --help` for
-all options, including `--seed` for a reproducible match and
-`--max-turns` as a safety valve against stalemates.
+A reply that doesn't parse — or one that commits more points than the
+warrior's current life — is treated as an illegal-move-style penalty
+(RULES.md 21, 41, 43) rather than crashing the match, and a pilot that
+fails to reply within the time limit is declared brain dead and removed
+from the match entirely (RULES.md 45). Run `bin/rwars --help` for all
+options, including `--seed` for a reproducible match, `--timeout` for
+the brain-dead limit, and `--max-turns` as a safety valve against
+stalemates.
 
-`examples/warriors/` has four ready-made brains with distinct
+Pass `--announcer` to put a radio play-by-play announcer in the booth:
+an LLM persona (default brain `lms/openai/gpt-oss-20b`, override with
+`--announcer PROVIDER/MODEL`) that narrates the lineup, every turn's
+recap, and the final result — and speaks each call aloud through
+macOS's `say`. The match runs at broadcast pace: each turn waits for
+the commentary to finish.
+
+`examples/warriors/` has five ready-made brains with distinct
 personalities — a fight between them exercises very different play
 styles:
 
 | Warrior | Strategy |
 |---|---|
 | `warmonger.md` | Relentlessly aggressive; attacks almost every turn |
+| `oppressor.md` | Warmonger's clone on a different brain (`lms/openai/gpt-oss-20b`) — shows per-warrior model choice in action |
 | `sentinel.md` | Patient turtle; claims territory by occupation, rarely fights |
 | `opportunist.md` | Reactive and adaptive; picks its spots, varies its play |
 | `wanderer.md` | Pure expansionist; claims empty ground, avoids conflict entirely |
@@ -130,13 +143,14 @@ gem install robot_wars
 require "robot_wars"
 ```
 
-More to come as the game engine takes shape.
+Drive the headless engine directly (see the Game Concept snippet above
+and `examples/01_random_match.rb`), or run a full LLM-piloted match with
+`bin/rwars`. The complete rules are in [RULES.md](RULES.md).
 
 ## Development
 
-After checking out the repo, run `bin/setup` to install dependencies. Then run
-`bundle exec rake test` to run the tests. You can also run `bin/console` for an
-interactive prompt that will allow you to experiment.
+After checking out the repo, run `bundle install` to install
+dependencies, then `bundle exec rake test` to run the tests.
 
 During cross-gem development the `Gemfile.local` points at the sibling
 `../robot_lab` checkout (selected via the project-root `.envrc` / asgard).

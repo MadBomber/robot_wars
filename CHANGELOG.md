@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+- RULES.md gained rules 41 (unparsable pilot reply = rule 21 solo
+  conflict) and 42 (Battleship-style HIT/MISS attack feedback),
+  documenting behavior already implemented.
+- `--seed` now really reproduces a match: `Game` derives its default
+  conflict-roll generator from the same `random`, so seeded runs get
+  identical rolls, not just identical placement.
+- Rule 43: committing more attack/defense points than current life is
+  an invalid action, punished as a solo conflict.
+- Rule 44: an attack aimed off the board costs the attacker half the
+  committed points (rounded up) and reports OFF THE BOARD to the
+  attacker.
+- Rule 46: dead robots take no further part in the turn — a dead loser
+  never returns home, a dead winner conquers nothing, and a robot
+  killed before the ranged phase neither fires nor counter-fires.
+- Rule 18 amended: a returner whose origin square is now owned by a
+  rival fights nobody — it retreats to a free neighbor (rule 19) or
+  dies (rule 20).
+- Rule 45 + `--timeout SECONDS` (default 60): a pilot that fails to
+  answer in time is declared brain dead and its robot is removed from
+  the match (`Game#remove_robot`) instead of hanging everyone.
+- `--announcer [PROVIDER/MODEL]`: a radio play-by-play announcer in
+  the booth — `Announcer` (an LLM persona with its own chat history
+  for cross-turn continuity) narrates the lineup, every turn's recap,
+  brain-dead removals, and the final result; `SaySpeaker` speaks each
+  call aloud through macOS's `say`. Default brain:
+  `lms/openai/gpt-oss-20b`.
+
+## [0.1.1] - 2026-09-17
+
 - Phase 1 engine foundation: `Position`, `Direction`, `Board`,
   `RollGenerator`/`FixedRollGenerator`, `Robot`, `Action`,
   `OccupancyMap`, `Territory`, `MoveResolver`, `ConflictResolver`,
@@ -9,8 +38,24 @@
   coverage.
 - Phase 1 turn orchestrator: `TurnResolver` (rule 40's full sequence,
   including cascading return conflicts and displacement-or-death) and
-  `Game` (setup, `play_turn`, win/tie detection) — 100% line/branch
-  coverage.
+  `Game` (setup, `play_turn`, win/tie detection, `--life` starting-life
+  override) — 100% line/branch coverage.
+- LLM warrior layer: `ActionParser` (STAY/MOVE/ATTACK/DEFEND grammar,
+  unparsable → `Action.invalid`), `SensingReport` (rule 33–35 report
+  with HIT/MISS attack feedback), `Warrior`, `LLMPilot`, `ModelSpec`
+  ("<provider>/<model id>" front-matter convention), and
+  `GameRules` (the canonical rules recap shipped as
+  `lib/robot_wars/game_rules.md`, handed to every robot as its system
+  prompt).
+- `rwars` CLI (`bin/rwars`, shipped as the gem executable): runs a
+  match of LLM-backed warriors from a directory of RobotLab `*.md`
+  prompt templates, with `--size/--width/--height`, `--life`,
+  `--max-turns`, `--seed`, and `--model` override; pilots are prompted
+  concurrently (one thread per warrior); per-turn transcript with
+  action recap, conflicts, ownership claims, and HIT/MISS lines.
+- Example warrior templates in `examples/warriors/` (warmonger,
+  oppressor, sentinel, opportunist, wanderer) and a runnable
+  random-action match in `examples/01_random_match.rb`.
 
 ## [0.1.0] - 2026-09-16
 

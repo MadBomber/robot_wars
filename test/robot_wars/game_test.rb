@@ -49,20 +49,60 @@ class RobotWars::GameTest < Minitest::Test
   end
 
   def test_a_2_robot_game_ends_when_one_robot_dies
-    game = start_game(%w[survivor victim])
-    survivor = game.robot("survivor")
-    victim = game.robot("victim")
-    victim_square = game.occupancy.position_of(victim)
-    lethal_points = victim.life + 1 # victim's `stay` heals 1 before the shell lands
+    game = RobotWars::Game.new(board: RobotWars::Board.new(width: 6, height: 6))
+    survivor = RobotWars::Robot.new(id: "survivor")
+    victim = RobotWars::Robot.new(id: "victim", life: 5)
+    game.add_robot(survivor, pos(0, 0))
+    game.add_robot(victim, pos(3, 3))
 
     game.play_turn(
-      survivor => RobotWars::Action.attack(square: victim_square, points: lethal_points),
+      survivor => RobotWars::Action.attack(square: pos(3, 3), points: 10),
       victim => RobotWars::Action.stay
     )
 
     assert_predicate game, :over?
     assert_equal survivor, game.winner
     refute_predicate game, :tie?
+  end
+
+  def test_a_seeded_game_reproduces_its_conflict_rolls
+    lives = Array.new(2) { colliding_turn(random: Random.new(7)) }
+
+    assert_equal lives.first, lives.last
+  end
+
+  def test_an_explicit_roll_generator_drives_the_conflict_rolls
+    lives = colliding_turn(roll_generator: RobotWars::FixedRollGenerator.new([4]))
+
+    # a: 100 - 1 move - 4 roll = 95 and wins; b: 90 - 1 - 4 = 85, sent home.
+    assert_equal [95, 85], lives
+  end
+
+  def test_remove_robot_kills_and_cleans_up_a_brain_dead_robot
+    game = start_game(%w[r1 r2])
+    r2 = game.robot("r2")
+    square = game.occupancy.position_of(r2)
+    game.territory.claim!(square, r2)
+
+    game.remove_robot(r2)
+
+    assert_predicate r2, :dead?
+    assert_nil game.occupancy.position_of(r2)
+    refute game.territory.owned?(square)
+    refute_includes game.robots, r2
+    assert_predicate game, :over?
+    assert_equal "r1", game.winner.id
+  end
+
+  def test_remove_robot_tolerates_a_robot_already_off_the_board
+    game = start_game(%w[r1 r2 r3])
+    r3 = game.robot("r3")
+
+    game.remove_robot(r3)
+    game.remove_robot(r3)
+
+    refute_includes game.robots, r3
+    refute_predicate game, :over?
   end
 
   def test_over_is_false_while_2_or_more_robots_are_alive
@@ -95,5 +135,24 @@ class RobotWars::GameTest < Minitest::Test
 
   def start_game(ids)
     RobotWars::Game.start(board: RobotWars::Board.new(width: 6, height: 6), robot_ids: ids, random: Random.new(1))
+  end
+
+  def pos(x, y) = RobotWars::Position.new(x: x, y: y)
+
+  # One head-on collision at (1,1) on a 3x3 board; returns both lives
+  # after the turn, so two identically seeded runs can be compared.
+  def colliding_turn(**game_options)
+    game = RobotWars::Game.new(board: RobotWars::Board.new(width: 3, height: 3), **game_options)
+    a = RobotWars::Robot.new(id: "a")
+    b = RobotWars::Robot.new(id: "b", life: 90)
+    game.add_robot(a, pos(0, 1))
+    game.add_robot(b, pos(2, 1))
+
+    game.play_turn(
+      a => RobotWars::Action.move(RobotWars::Direction::EAST),
+      b => RobotWars::Action.move(RobotWars::Direction::WEST)
+    )
+
+    [a.life, b.life]
   end
 end

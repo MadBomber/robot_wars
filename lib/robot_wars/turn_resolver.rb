@@ -12,6 +12,7 @@ module RobotWars
   # than re-fighting the robot that just beat it; and each robot's own
   # defeat count (not a per-event count) is what caps a chain at two
   # losses, so displacing a robot only starts THAT robot's own count.
+  # :reek:TooManyMethods -- one small private method per rule 40 step and sub-case; consolidation would bury the sequence.
   class TurnResolver
     Report = Data.define(:deaths, :ranged_effects, :conflicts, :solo_conflicts, :claims) do
       # Battleship-style feedback for an attacker: :hit when this
@@ -22,7 +23,7 @@ module RobotWars
       # :reek:ControlParameter -- `robot` is the query subject being looked up, not a behavior switch.
       # :reek:FeatureEnvy -- `effect` is the block's own search variable; there is no better home for a Report query.
       def attack_outcome_for(robot)
-        ranged_effects.find { |effect| effect.source == robot && %i[hit miss].include?(effect.kind) }&.kind
+        ranged_effects.find { |effect| effect.source == robot && %i[hit miss off_board].include?(effect.kind) }&.kind
       end
 
       # The squares this robot NEWLY came to own this turn — by conquest
@@ -38,11 +39,23 @@ module RobotWars
 
     # One resolved square conflict (rules 13-16), kept on the Report so a
     # match transcript can say what happened, not just the resulting life
-    # totals. `winner` is nil on a tie.
-    Conflict = Data.define(:square, :robots, :roll, :winner, :losers) do
+    # totals. `winner` is nil on a tie; `winner_died` marks a winner the
+    # roll itself killed (rule 46: it wins nothing).
+    Conflict = Data.define(:square, :robots, :roll, :winner, :losers, :winner_died) do
+      # :reek:BooleanParameter -- winner_died is a recorded fact on an event value, not a behavior switch.
+      def initialize(square:, robots:, roll:, winner:, losers:, winner_died: false)
+        super
+      end
+
       def to_s
-        outcome = winner ? "#{winner.id} takes the square" : "tie, everyone loses"
         "conflict at (#{square.x},#{square.y}): #{robots.map(&:id).join(' vs ')} — roll #{roll}, #{outcome}"
+      end
+
+      def outcome
+        if winner_died then "#{winner.id} wins but dies"
+        elsif winner   then "#{winner.id} takes the square"
+        else                "tie, everyone loses"
+        end
       end
     end
 
@@ -72,10 +85,12 @@ module RobotWars
     # :reek:TooManyStatements -- the rule 40 turn sequence, one linear step per phase; splitting it would hide the order.
     def resolve!(actions)
       reset_turn_log
+      actions = actions.to_h { |robot, action| [robot, effective_action(robot, action)] }
       origins = actions.keys.to_h { |robot| [robot, @occupancy.position_of(robot)] }
 
       destinations = apply_movement_economy(actions)
-      settled, eliminated = resolve_square_conflicts(destinations, origins)
+      eliminated = drop_movement_deaths(destinations)
+      settled = resolve_square_conflicts(destinations, origins, eliminated)
       commit_occupancy(settled)
 
       ranged_effects = resolve_ranged_combat(actions)
@@ -95,6 +110,17 @@ module RobotWars
       @conflicts = []
       @solo_conflicts = []
       @claims = []
+    end
+
+    # Rule 43: committing more points than the robot's current life —
+    # measured at declaration time, before any of the turn's effects —
+    # as an attack or a defense is a pilot error, treated exactly like
+    # an unparsable reply (rule 41).
+    # :reek:FeatureEnvy -- judging the action's commitment is this method's whole job; the Action is pure data.
+    def effective_action(robot, action)
+      return Action.invalid if (action.attack? || action.defend?) && action.points > robot.life
+
+      action
     end
 
     # --- Movement and the life-point economy (rules 9-11, 21) ---------
@@ -133,23 +159,29 @@ module RobotWars
       @solo_conflicts << SoloConflict.new(robot: robot, roll: result.roll)
     end
 
+    # A robot can die during the movement phase itself — a solo-conflict
+    # roll, or the -1 move cost, on low life. Dead robots take no
+    # further part in the turn (rule 46), so they leave the board here.
+    def drop_movement_deaths(destinations)
+      destinations.keys.select(&:dead?).each { |robot| destinations.delete(robot) }
+    end
+
     # --- Square conflicts, cascading returns, displacement (13-20) ----
 
     # :reek:TooManyStatements -- initial-conflict pass plus the cascading-return queue drain belong together (rules 13-20).
-    def resolve_square_conflicts(destinations, origins)
+    def resolve_square_conflicts(destinations, origins, eliminated)
       settled = {}
-      eliminated = []
       defeats = Hash.new(0)
       queue = []
 
-      groups_by_square(destinations).each { |square, contenders| settle(square, contenders, settled, defeats, queue) }
+      groups_by_square(destinations).each { |square, contenders| settle(square, contenders, settled, defeats, queue, eliminated) }
 
       until queue.empty?
         robot, lost_at = queue.shift.values_at(:robot, :lost_at)
         return_home(robot, lost_at, origins, settled, defeats, eliminated, queue)
       end
 
-      [settled, eliminated]
+      settled
     end
 
     def groups_by_square(destinations)
@@ -159,27 +191,35 @@ module RobotWars
     end
 
     # Resolves one square's contenders: the sole robot, or the winner of
-    # a conflict, settles there and (on conquest) claims it; every loser
-    # is queued to attempt its own return.
+    # a conflict, settles there and (on conquest) claims it; every
+    # surviving loser is queued to attempt its own return. The roll can
+    # kill (rule 36), and a dead robot fights no further and wins
+    # nothing (rule 46) — a dead winner conquers no square, a dead loser
+    # never goes home.
     # :reek:TooManyStatements -- fight, log, settle-or-vacate, queue losers: one linear pass per contested square.
-    def settle(square, contenders, settled, defeats, queue)
+    # :reek:LongParameterList -- the cascade's working state is one turn's transient data (see return_home).
+    def settle(square, contenders, settled, defeats, queue, eliminated)
       if contenders.one?
         settled[square] = contenders.first
         return
       end
 
       @conflict_resolver.resolve(contenders) => { winner:, losers:, roll: }
+      winner_died = winner ? winner.dead? : false
       @conflicts << Conflict.new(square: square, robots: contenders, roll: roll,
-                                 winner: winner, losers: losers)
+                                 winner: winner, losers: losers, winner_died: winner_died)
 
-      if winner
+      if winner && !winner_died
         settled[square] = winner
         record_conquest(square, winner)
       else
+        eliminated << winner if winner_died
         settled.delete(square)
       end
 
       losers.each do |loser|
+        next eliminated << loser if loser.dead?
+
         defeats[loser] += 1
         queue << { robot: loser, lost_at: square }
       end
@@ -195,11 +235,20 @@ module RobotWars
 
     # :reek:LongParameterList -- the cascade's working state (origins/settled/defeats/eliminated/queue) is one
     # turn's transient data; promoting it to ivars or a context object would outlive its single resolve! pass.
+    # :reek:TooManyStatements -- the four return outcomes of rules 17-20 (displace, rival-owned home, free home, fight) in order.
     def return_home(robot, lost_at, origins, settled, defeats, eliminated, queue)
       home = origins[robot]
 
       if home == lost_at || defeats[robot] >= 2
         displace_or_eliminate(robot, lost_at, settled, eliminated)
+        return
+      end
+
+      # An origin square a rival now owns cannot be re-entered (rules
+      # 18/24, ruled 2026-09-17): the returner retreats to a free
+      # neighbor or dies, exactly like a second defeat.
+      if @territory.owned_by_other?(home, robot)
+        displace_or_eliminate(robot, home, settled, eliminated)
         return
       end
 
@@ -209,7 +258,7 @@ module RobotWars
         return
       end
 
-      settle(home, [robot, occupant], settled, defeats, queue)
+      settle(home, [robot, occupant], settled, defeats, queue, eliminated)
     end
 
     def displace_or_eliminate(robot, near, settled, eliminated)
@@ -232,11 +281,14 @@ module RobotWars
 
     # --- Ranged combat (26-32) -----------------------------------------
 
+    # Only the living fight at range (rule 46): a robot killed in the
+    # movement or conflict phases neither fires its attack nor
+    # counter-fires its defense.
     def resolve_ranged_combat(actions)
-      attacks = actions.filter_map { |robot, action| build_attack(robot, action) if action.attack? }
-      defenses = actions.filter_map { |robot, action| build_defense(robot, action) if action.defend? }
+      attacks = actions.filter_map { |robot, action| build_attack(robot, action) if action.attack? && robot.alive? }
+      defenses = actions.filter_map { |robot, action| build_defense(robot, action) if action.defend? && robot.alive? }
 
-      RangedCombatResolver.new(occupancy_map: @occupancy).resolve(attacks: attacks, defenses: defenses)
+      RangedCombatResolver.new(occupancy_map: @occupancy, board: @board).resolve(attacks: attacks, defenses: defenses)
     end
 
     def build_attack(robot, action)

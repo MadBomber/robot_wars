@@ -3,7 +3,11 @@ module RobotWars
   class Game
     attr_reader :board, :occupancy, :territory, :turn_number
 
-    def initialize(board:, roll_generator: RollGenerator.new, random: Random.new)
+    # The default roll generator is derived from the SAME `random`, so a
+    # seeded match reproduces its conflict rolls too — not just its
+    # placement and displacement picks.
+    # :reek:ControlParameter -- `x || Default.new` is an injectable-collaborator fallback, not behavior selection.
+    def initialize(board:, roll_generator: nil, random: Random.new)
       @board = board
       @occupancy = OccupancyMap.new
       @territory = Territory.new
@@ -11,13 +15,13 @@ module RobotWars
       @turn_number = 0
       @turn_resolver = TurnResolver.new(
         board: board, occupancy: @occupancy, territory: @territory,
-        roll_generator: roll_generator, random: random
+        roll_generator: roll_generator || RollGenerator.new(random: random), random: random
       )
     end
 
     # Places robots on distinct random squares (rule 6), each starting
     # with `life` points (rule 5's 100 unless the match says otherwise).
-    def self.start(board:, robot_ids:, life: Robot::STARTING_LIFE, roll_generator: RollGenerator.new, random: Random.new)
+    def self.start(board:, robot_ids:, life: Robot::STARTING_LIFE, roll_generator: nil, random: Random.new)
       game = new(board: board, roll_generator: roll_generator, random: random)
       positions = board.sample_positions(robot_ids.size, random: random)
 
@@ -41,6 +45,19 @@ module RobotWars
 
     def alive_robots
       @robots.select(&:alive?)
+    end
+
+    # Removes a robot from the match outside normal turn resolution —
+    # the rule 45 "brain dead" case: a pilot that failed to answer in
+    # time. The robot dies; its square is vacated and its territory
+    # released, exactly as a mid-turn death would be handled.
+    def remove_robot(robot)
+      robot.eliminate!
+      position = @occupancy.position_of(robot)
+      @occupancy.vacate(position) if position
+      @territory.release!(robot)
+      @robots.delete(robot)
+      robot
     end
 
     def over?

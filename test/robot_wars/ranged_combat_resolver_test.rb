@@ -3,11 +3,12 @@ require "test_helper"
 class RobotWars::RangedCombatResolverTest < Minitest::Test
   def setup
     @map = RobotWars::OccupancyMap.new
+    @board = RobotWars::Board.new(width: 8, height: 8)
     @attacker = RobotWars::Robot.new(id: "attacker")
     @target = RobotWars::Robot.new(id: "target")
     @square = RobotWars::Position.new(x: 4, y: 4)
     @map.place(@target, @square)
-    @resolver = RobotWars::RangedCombatResolver.new(occupancy_map: @map)
+    @resolver = RobotWars::RangedCombatResolver.new(occupancy_map: @map, board: @board)
   end
 
   def test_an_undefended_hit_costs_the_target_the_full_amount_and_the_attacker_nothing
@@ -27,6 +28,25 @@ class RobotWars::RangedCombatResolverTest < Minitest::Test
 
     assert_equal 100, @attacker.life
     assert_equal 100, @target.life
+  end
+
+  def test_an_off_board_attack_costs_the_attacker_half_the_points_rounded_up
+    attack = attack_order(square: RobotWars::Position.new(x: -1, y: 3), points: 5)
+
+    effects = @resolver.resolve(attacks: [attack], defenses: [])
+
+    assert_equal 97, @attacker.life
+    assert_equal 100, @target.life
+    assert_equal [:off_board], effects.map(&:kind)
+    assert_equal 3, effects.first.amount
+  end
+
+  def test_an_off_board_attack_with_even_points_costs_exactly_half
+    attack = attack_order(square: RobotWars::Position.new(x: 8, y: 8), points: 10)
+
+    @resolver.resolve(attacks: [attack], defenses: [])
+
+    assert_equal 95, @attacker.life
   end
 
   def test_a_defended_target_still_takes_the_full_hit

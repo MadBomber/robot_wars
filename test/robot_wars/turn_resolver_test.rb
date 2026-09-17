@@ -76,6 +76,52 @@ class RobotWars::TurnResolverTest < Minitest::Test
     assert_equal [RobotWars::TurnResolver::SoloConflict.new(robot: robot, roll: 7)], report.solo_conflicts
   end
 
+  # Rule 43: committing more points than current life is a pilot error,
+  # punished exactly like an unparsable reply.
+  def test_an_attack_committing_more_than_current_life_is_an_invalid_action
+    robot = place("r1", life: 10, at: [1, 1])
+    resolver = turn_resolver(illegal_move_resolver: illegal_move_resolver(rolls: [6]))
+
+    report = resolver.resolve!(robot => RobotWars::Action.attack(square: pos(0, 0), points: 11))
+
+    assert_equal 4, robot.life
+    assert_equal 1, report.solo_conflicts.size
+    assert_empty report.ranged_effects
+    assert_equal pos(1, 1), @occupancy.position_of(robot)
+  end
+
+  def test_a_defense_committing_more_than_current_life_is_an_invalid_action
+    robot = place("r1", life: 10, at: [1, 1])
+    resolver = turn_resolver(illegal_move_resolver: illegal_move_resolver(rolls: [6]))
+
+    report = resolver.resolve!(robot => RobotWars::Action.defend(points: 11))
+
+    assert_equal 4, robot.life
+    assert_equal 1, report.solo_conflicts.size
+    assert_empty report.ranged_effects
+  end
+
+  def test_committing_exactly_the_current_life_is_legal
+    robot = place("r1", life: 10, at: [1, 1])
+
+    report = resolve(robot => RobotWars::Action.attack(square: pos(0, 0), points: 10))
+
+    assert_equal 10, robot.life
+    assert_equal :miss, report.attack_outcome_for(robot)
+    assert_empty report.solo_conflicts
+  end
+
+  # Rule 44 through the full turn: the attacker also gets :off_board
+  # feedback, the one clue that the shot was aimed nowhere.
+  def test_an_attack_on_an_off_board_square_costs_half_and_reports_off_board
+    robot = place("r1", life: 100, at: [1, 1])
+
+    report = resolve(robot => RobotWars::Action.attack(square: pos(5, 5), points: 4))
+
+    assert_equal 98, robot.life
+    assert_equal :off_board, report.attack_outcome_for(robot)
+  end
+
   def test_staying_3_turns_reports_the_occupation_claim_on_the_third
     robot = place("r1", life: 100, at: [1, 1])
     resolver = turn_resolver
@@ -218,6 +264,136 @@ class RobotWars::TurnResolverTest < Minitest::Test
       c => RobotWars::Action.move(RobotWars::Direction::WEST),
       d => RobotWars::Action.move(RobotWars::Direction::WEST),
       z => RobotWars::Action.stay
+    )
+
+    assert_predicate a, :dead?
+    assert_nil @occupancy.position_of(a)
+    assert_includes report.deaths, a
+  end
+
+  # --- Rule 46: dead robots take no further part in the turn ---------
+
+  def test_a_loser_killed_by_the_conflict_roll_never_returns_home
+    strong = place("strong", life: 100, at: [0, 1])
+    weak = place("weak", life: 5, at: [2, 1])
+
+    resolver = turn_resolver(conflict_resolver: conflict_resolver(rolls: [6]))
+    report = resolver.resolve!(
+      strong => RobotWars::Action.move(RobotWars::Direction::EAST),
+      weak => RobotWars::Action.move(RobotWars::Direction::WEST)
+    )
+
+    assert_predicate weak, :dead?
+    assert_nil @occupancy.position_of(weak)
+    assert_includes report.deaths, weak
+    assert_equal 1, report.conflicts.size
+    assert @territory.owned_by?(pos(1, 1), strong)
+  end
+
+  def test_a_winner_killed_by_the_conflict_roll_wins_nothing
+    a = place("a", life: 6, at: [0, 1])
+    b = place("b", life: 5, at: [2, 1])
+
+    resolver = turn_resolver(conflict_resolver: conflict_resolver(rolls: [6]))
+    report = resolver.resolve!(
+      a => RobotWars::Action.move(RobotWars::Direction::EAST),
+      b => RobotWars::Action.move(RobotWars::Direction::WEST)
+    )
+
+    conflict = report.conflicts.first
+    assert_equal a, conflict.winner
+    assert conflict.winner_died
+    assert_equal "conflict at (1,1): a vs b — roll 6, a wins but dies", conflict.to_s
+
+    assert_equal [a, b].sort_by(&:id), report.deaths.sort_by(&:id)
+    refute @occupancy.occupied?(pos(1, 1))
+    refute @territory.owned?(pos(1, 1))
+  end
+
+  def test_a_robot_killed_in_the_movement_phase_leaves_the_board_before_conflicts
+    doomed = place("doomed", life: 5, at: [1, 1])
+    walker = place("walker", life: 100, at: [0, 1])
+
+    resolver = turn_resolver(illegal_move_resolver: illegal_move_resolver(rolls: [10]))
+    report = resolver.resolve!(
+      doomed => RobotWars::Action.invalid,
+      walker => RobotWars::Action.move(RobotWars::Direction::EAST)
+    )
+
+    assert_predicate doomed, :dead?
+    assert_includes report.deaths, doomed
+    # The corpse is gone, so walker finds (1,1) empty — no conflict.
+    assert_empty report.conflicts
+    assert_equal pos(1, 1), @occupancy.position_of(walker)
+  end
+
+  def test_a_dead_robots_declared_attack_does_not_fire
+    gunner = place("gunner", life: 3, at: [1, 1])
+    brawler = place("brawler", life: 100, at: [0, 1])
+    bystander = place("bystander", life: 100, at: [0, 0])
+
+    resolver = turn_resolver(conflict_resolver: conflict_resolver(rolls: [5]))
+    report = resolver.resolve!(
+      gunner => RobotWars::Action.attack(square: pos(0, 0), points: 3),
+      brawler => RobotWars::Action.move(RobotWars::Direction::EAST),
+      bystander => RobotWars::Action.stay
+    )
+
+    assert_predicate gunner, :dead?
+    assert_equal 101, bystander.life
+    assert_empty report.ranged_effects
+  end
+
+  def test_a_dead_defender_neither_counter_fires_nor_pays_the_premium
+    turtle = place("turtle", life: 5, at: [1, 1])
+    brawler = place("brawler", life: 100, at: [0, 1])
+
+    resolver = turn_resolver(conflict_resolver: conflict_resolver(rolls: [6]))
+    report = resolver.resolve!(
+      turtle => RobotWars::Action.defend(points: 5),
+      brawler => RobotWars::Action.move(RobotWars::Direction::EAST)
+    )
+
+    assert_predicate turtle, :dead?
+    assert_equal(-1, turtle.life)
+    assert_empty report.ranged_effects
+  end
+
+  # --- Rules 18/24 (ruled 2026-09-17): a home square a rival now owns
+  # --- cannot be re-entered — retreat to a free neighbor or die.
+
+  def test_a_returner_whose_home_is_rival_owned_retreats_to_a_free_neighbor
+    landlord = RobotWars::Robot.new(id: "landlord")
+    @territory.claim!(pos(0, 0), landlord)
+    @territory.claim!(pos(0, 1), landlord)
+    a = place("a", life: 100, at: [0, 0])
+    c = place("c", life: 110, at: [2, 0])
+
+    resolver = turn_resolver(conflict_resolver: conflict_resolver(rolls: [5]))
+    report = resolver.resolve!(
+      a => RobotWars::Action.move(RobotWars::Direction::EAST),
+      c => RobotWars::Action.move(RobotWars::Direction::WEST)
+    )
+
+    # Home (0,0) is landlord's; of its neighbors (1,0) is taken by c and
+    # (0,1) is landlord's too — (1,1) is the only place left to stand.
+    assert_predicate a, :alive?
+    assert_equal pos(1, 1), @occupancy.position_of(a)
+    assert_equal 1, report.conflicts.size
+  end
+
+  def test_a_returner_whose_home_is_rival_owned_dies_with_no_free_neighbor
+    landlord = RobotWars::Robot.new(id: "landlord")
+    @territory.claim!(pos(0, 0), landlord)
+    @territory.claim!(pos(0, 1), landlord)
+    @territory.claim!(pos(1, 1), landlord)
+    a = place("a", life: 100, at: [0, 0])
+    c = place("c", life: 110, at: [2, 0])
+
+    resolver = turn_resolver(conflict_resolver: conflict_resolver(rolls: [5]))
+    report = resolver.resolve!(
+      a => RobotWars::Action.move(RobotWars::Direction::EAST),
+      c => RobotWars::Action.move(RobotWars::Direction::WEST)
     )
 
     assert_predicate a, :dead?

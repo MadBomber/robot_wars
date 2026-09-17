@@ -29,10 +29,16 @@ The rules, in brief:
   there, it loses that full amount. Attacking is free UNLESS the
   target had committed to DEFEND — then you take their full defended
   amount back as counter-fire, regardless of how much damage you
-  dealt. You can never be sure a square is undefended.
+  dealt. You can never be sure a square is undefended. Aiming at a
+  square that is off the board wastes the shot and costs you half the
+  committed points.
 - Defending: commits points that counter-hit every attacker that turn
   for your full committed amount. If nobody attacks you, defending
   still costs 1 life as a premium for bracing.
+- Committing more points than your current life — attacking or
+  defending — is an illegal action, punished like an illegal move.
+  And answer promptly: a brain that fails to reply in time is declared
+  brain dead and its warrior is removed from the match.
 - You die at 0 life, or by being crushed with nowhere to stand. A dead
   warrior's territory is released.
 

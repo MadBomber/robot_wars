@@ -46,6 +46,12 @@ class RobotWars::SensingReportTest < Minitest::Test
     assert_includes text, "Your attack last turn was a MISS."
   end
 
+  def test_tells_an_attacker_its_last_attack_went_off_the_board
+    text = RobotWars::SensingReport.new(game: @game, robot: @robot, attack_outcome: :off_board).to_s
+
+    assert_includes text, "Your attack last turn was OFF THE BOARD and cost you half its committed points."
+  end
+
   def test_says_nothing_about_attacks_when_the_robot_did_not_attack
     refute_includes report, "Your attack last turn"
   end

@@ -8,8 +8,9 @@ module RobotWars
     DefendOrder = Data.define(:defender, :points)
     Effect = Data.define(:kind, :robot, :amount, :source)
 
-    def initialize(occupancy_map:)
+    def initialize(occupancy_map:, board:)
       @occupancy_map = occupancy_map
+      @board = board
     end
 
     def resolve(attacks:, defenses:)
@@ -23,7 +24,10 @@ module RobotWars
     private
 
     # :reek:FeatureEnvy -- an AttackOrder is pure data; resolving it needs this resolver's occupancy map and defense table.
+    # :reek:TooManyStatements -- the rule 44/27/30 outcome ladder (off-board, miss, hit, counter-fire) is one linear pass.
     def resolve_attack(attack, defense_by_defender, attacked_defenders)
+      return [off_board(attack)] unless @board.on_board?(attack.square)
+
       target = @occupancy_map.robot_at(attack.square)
       return [miss(attack)] unless target
 
@@ -39,6 +43,16 @@ module RobotWars
 
     def miss(attack)
       Effect.new(kind: :miss, robot: nil, amount: attack.points, source: attack.attacker)
+    end
+
+    # Rule 44: shelling a square that is not on the board hits nothing
+    # and costs the attacker half the committed points, rounded up so
+    # no shot is free.
+    def off_board(attack)
+      attacker = attack.attacker
+      penalty = (attack.points + 1) / 2
+      attacker.apply_damage(penalty)
+      Effect.new(kind: :off_board, robot: attacker, amount: penalty, source: attacker)
     end
 
     def counter_fire(attacker, defense)

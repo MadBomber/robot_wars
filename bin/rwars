@@ -19,6 +19,12 @@ require "bundler/setup"
 require "optparse"
 require "robot_wars"
 
+# The transcript is watched live (and each turn can stall for seconds
+# on pilot LLM calls or the announcer's speech), so lines must land the
+# moment they're printed — even when stdout is a pipe or a file, where
+# Ruby would otherwise block-buffer whole turns.
+$stdout.sync = true
+
 # Each warrior's own *.md front matter picks its brain: the `model:`
 # field is "<provider>/<model id>" (e.g. apfel/apple-foundationmodel),
 # parsed by RobotWars::ModelSpec. --model, in the same format, forces
@@ -26,14 +32,17 @@ require "robot_wars"
 # model of its own — a template that names neither falls through to
 # RobotLab's config cascade.
 options = { width: 10, height: 10, max_turns: 500, seed: nil, model: nil,
-            life: RobotWars::Robot::STARTING_LIFE }
+            life: RobotWars::Robot::STARTING_LIFE, timeout: 60.0, announcer: nil }
+
+timeout_help   = "Seconds a pilot may take to answer each turn before it is declared brain dead " \
+                 "and its robot removed from the match (default: #{options[:timeout].to_i})"
+announcer_help = "Add a radio play-by-play announcer who speaks each turn aloud through macOS's " \
+                 "`say` (default model: #{RobotWars::Announcer::DEFAULT_MODEL})"
 
 parser = OptionParser.new do |opts|
   opts.banner = "Usage: rwars --warriors DIR [options]"
 
-  opts.on("-w", "--warriors DIR", "Directory of *.md warrior brain templates (required)") do |dir|
-    options[:warriors] = dir
-  end
+  opts.on("-w", "--warriors DIR", "Directory of *.md warrior brain templates (required)") { |dir| options[:warriors] = dir }
   opts.on("--width N", Integer, "Board width (default: #{options[:width]})") { |n| options[:width] = n }
   opts.on("--height N", Integer, "Board height (default: #{options[:height]})") { |n| options[:height] = n }
   opts.on("--size WxH", "Board size shorthand, e.g. 12x12 (overrides --width/--height)") do |size|
@@ -44,9 +53,9 @@ parser = OptionParser.new do |opts|
   end
   opts.on("--seed N", Integer, "Seed the random number generator for a reproducible match") { |n| options[:seed] = n }
   opts.on("--life N", Integer, "Starting life for every robot (default: #{options[:life]})") { |n| options[:life] = n }
-  opts.on("--model PROVIDER/MODEL", "Force every warrior onto this model, overriding its own front matter") do |m|
-    options[:model] = m
-  end
+  opts.on("--model PROVIDER/MODEL", "Force every warrior onto this model, overriding its own front matter") { |m| options[:model] = m }
+  opts.on("--timeout SECONDS", Float, timeout_help) { |secs| options[:timeout] = secs }
+  opts.on("--announcer [PROVIDER/MODEL]", announcer_help) { |m| options[:announcer] = m || RobotWars::Announcer::DEFAULT_MODEL }
   opts.on("--version", "Show the robot_wars gem version") do
     puts "rwars #{RobotWars::VERSION}"
     exit
@@ -65,6 +74,7 @@ unless options[:warriors]
 end
 
 abort "error: --life must be positive; got #{options[:life]}" unless options[:life].positive?
+abort "error: --timeout must be positive; got #{options[:timeout]}" unless options[:timeout].positive?
 
 warriors_dir = File.expand_path(options[:warriors])
 abort "error: #{warriors_dir} is not a directory" unless File.directory?(warriors_dir)
@@ -96,11 +106,12 @@ override = RobotWars::ModelSpec.parse(options[:model])
 specs = game.robots.to_h do |robot|
   [robot, override || RobotWars::ModelSpec.from_template(File.join(warriors_dir, "#{robot.id}.md"))]
 end
+announcer_spec = RobotWars::ModelSpec.parse(options[:announcer])
 
 # Providers that live outside ruby_llm itself (apfel, lms, ...) ship as
 # ruby_llm-providers-<name> gems and register themselves when required;
 # built-in providers are already in the registry and need nothing.
-specs.values.compact.map(&:provider).compact.uniq.each do |provider|
+(specs.values + [announcer_spec]).compact.map(&:provider).compact.uniq.each do |provider|
   next if RubyLLM::Provider.providers.key?(provider)
 
   begin
@@ -126,10 +137,25 @@ warriors = game.robots.to_h do |robot|
   [robot, RobotWars::Warrior.new(robot: robot, pilot: RobotWars::LLMPilot.new(llm_robot: llm_robot))]
 end
 
-puts <<~HEADER
+# The announcer is not a combatant: no warrior template, no sensing
+# reports — just the Announcer persona as its system prompt and each
+# turn's printed recap as its message. Its RobotLab chat keeps history,
+# so the commentary can carry rivalries and momentum across turns. Each
+# call blocks until `say` finishes: the match runs at broadcast pace.
+announcer = nil
+if announcer_spec
+  booth = RobotLab.build(name: "announcer", system_prompt: RobotWars::Announcer::PERSONA,
+                         model: announcer_spec.model, provider: announcer_spec.provider,
+                         temperature: 0.9)
+  announcer = RobotWars::Announcer.new(llm_robot: booth)
+end
+
+header = <<~HEADER
   RobotWars — #{warrior_ids.size} warriors on a #{board.width}x#{board.height} board
   warriors: #{warrior_ids.join(', ')}
 HEADER
+puts header
+announcer&.announce(header)
 
 last_report = nil
 until game.over? || game.turn_number >= options[:max_turns]
@@ -155,20 +181,37 @@ until game.over? || game.turn_number >= options[:max_turns]
     [robot, thread]
   end
 
-  # Thread#value re-raises a failed brain's exception here, preserving
-  # the serial loop's abort behavior.
-  actions = threads.to_h do |robot, thread|
-    [robot, thread.value]
-  rescue StandardError => e
-    abort "error: #{robot.id}'s brain failed to respond (#{e.class}: #{e.message})"
+  # One shared deadline for the whole volley: a pilot that hasn't
+  # answered by then is brain dead (rule 45) — its robot is removed
+  # from the match instead of hanging everyone. Thread#value re-raises
+  # a failed brain's exception, preserving the serial loop's abort
+  # behavior for real errors.
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + options[:timeout]
+  actions = {}
+  threads.each do |robot, thread|
+    remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    if thread.join([remaining, 0].max)
+      begin
+        actions[robot] = thread.value
+      rescue StandardError => e
+        abort "error: #{robot.id}'s brain failed to respond (#{e.class}: #{e.message})"
+      end
+    else
+      thread.kill
+      game.remove_robot(robot)
+      obituary = "#{robot.id} is brain dead (no reply within #{options[:timeout]}s) — removed from the match"
+      puts obituary
+      announcer&.announce(obituary)
+    end
   end
+  next if game.over?
 
   # Origins must be read before resolution — afterward a robot may have
   # moved, been displaced, or died off the board.
   origins = actions.keys.to_h { |robot| [robot, game.occupancy.position_of(robot)] }
 
   report = game.play_turn(actions)
-  puts "turn #{game.turn_number}: #{game.alive_robots.map { |r| "#{r.id}=#{r.life}" }.join(', ')}"
+  recap = ["turn #{game.turn_number}: #{game.alive_robots.map { |r| "#{r.id}=#{r.life}" }.join(', ')}"]
   # Recap what each warrior declared this turn — every robot that was
   # alive when actions were collected, including any the turn just
   # eliminated — then the conflicts those declarations caused, in the
@@ -178,23 +221,30 @@ until game.over? || game.turn_number >= options[:max_turns]
     line = "  #{robot.id}: #{action.describe(origins.fetch(robot))}"
     owned = report.claimed_squares_for(robot).map { |square| "(#{square.x},#{square.y})" }
     line << " — now owns #{owned.join(', ')}" unless owned.empty?
-    puts line
+    recap << line
   end
-  (report.solo_conflicts + report.conflicts).each { |conflict| puts "  #{conflict}" }
+  (report.solo_conflicts + report.conflicts).each { |conflict| recap << "  #{conflict}" }
   # Ranged shots resolve last; show each attacker's Battleship-style
   # outcome (the same feedback its next sensing report will carry).
   actions.each_key do |robot|
-    outcome = report.attack_outcome_for(robot)
-    puts "  #{robot.id}'s attack was a #{outcome.to_s.upcase}" if outcome
+    case report.attack_outcome_for(robot)
+    in nil then nil
+    in :off_board then recap << "  #{robot.id}'s attack was OFF THE BOARD"
+    in outcome then recap << "  #{robot.id}'s attack was a #{outcome.to_s.upcase}"
+    end
   end
+  puts recap
+  announcer&.announce(recap.join("\n"))
   last_report = report
 end
 
+finale = if game.tie?
+           "Tie — the last warriors fell in the same turn."
+         elsif game.over?
+           "Winner: #{game.winner.id} (#{game.winner.life} life) after #{game.turn_number} turns."
+         else
+           "Stopped after #{game.turn_number} turns (max-turns reached) — #{game.alive_robots.size} warriors still standing."
+         end
 puts "---"
-if game.tie?
-  puts "Tie — the last warriors fell in the same turn."
-elsif game.over?
-  puts "Winner: #{game.winner.id} (#{game.winner.life} life) after #{game.turn_number} turns."
-else
-  puts "Stopped after #{game.turn_number} turns (max-turns reached) — #{game.alive_robots.size} warriors still standing."
-end
+puts finale
+announcer&.announce(finale)
