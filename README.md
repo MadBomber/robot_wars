@@ -116,6 +116,14 @@ picks `lms/openai/gpt-oss-20b`), or your own file anywhere via
 `--announcer path/to/my_announcer.md`. The match runs at broadcast
 pace: each turn waits for the commentary to finish.
 
+Pass `--browser` to watch in a web browser: a spectator page served
+from a background thread (no extra dependencies) and opened in your
+default browser, showing the board grid with every warrior's icon in
+its own color plus a legend of ids, life, and squares. For now it is
+a frozen snapshot of the initial placement — live turn-by-turn
+updates are the next step. Bare `--browser` picks a free port;
+`--browser PORT` fixes it.
+
 `examples/warriors/` has five ready-made brains with distinct
 personalities — a fight between them exercises very different play
 styles:

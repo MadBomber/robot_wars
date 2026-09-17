@@ -25,6 +25,10 @@ require_relative "robot_wars/warrior"
 require_relative "robot_wars/llm_pilot"
 require_relative "robot_wars/say_speaker"
 require_relative "robot_wars/announcer"
+require_relative "robot_wars/svg_board"
+require_relative "robot_wars/spectator_page"
+require_relative "robot_wars/spectator_server"
+require_relative "robot_wars/browser_opener"
 
 module RobotWars
   # Raised for RobotWars-specific misuse.

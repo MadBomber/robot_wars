@@ -40,9 +40,12 @@ default_warriors  = File.join(repo_root, "examples", "warriors")
 default_announcer = File.join(default_warriors, "_announcer.md")
 
 options = { warriors: default_warriors, width: 10, height: 10, max_turns: 500, seed: nil,
-            model: nil, life: RobotWars::Robot::STARTING_LIFE, timeout: 60.0, announcer: nil }
+            model: nil, life: RobotWars::Robot::STARTING_LIFE, timeout: 60.0, announcer: nil,
+            browser: nil }
 
 warriors_help  = "Directory of *.md warrior brain templates (default: the gem's examples/warriors)"
+browser_help   = "Watch the match in a web browser (currently: the initial board placement). " \
+                 "PORT fixes the spectator server's port (default: an OS-assigned free port)"
 timeout_help   = "Seconds a pilot may take to answer each turn before it is declared brain dead " \
                  "and its robot removed from the match (default: #{options[:timeout].to_i})"
 announcer_help = "Add a radio play-by-play announcer who speaks each turn aloud through the " \
@@ -67,6 +70,7 @@ parser = OptionParser.new do |opts|
   opts.on("--model PROVIDER/MODEL", "Force every warrior onto this model, overriding its own front matter") { |m| options[:model] = m }
   opts.on("--timeout SECONDS", Float, timeout_help) { |secs| options[:timeout] = secs }
   opts.on("--announcer [FILE]", announcer_help) { |file| options[:announcer] = File.expand_path(file || default_announcer) }
+  opts.on("--browser [PORT]", Integer, browser_help) { |port| options[:browser] = port || 0 }
   opts.on("--version", "Show the robot_wars gem version") do
     puts "rwars #{RobotWars::VERSION}"
     exit
@@ -81,6 +85,9 @@ parser.parse!(ARGV)
 
 abort "error: --life must be positive; got #{options[:life]}" unless options[:life].positive?
 abort "error: --timeout must be positive; got #{options[:timeout]}" unless options[:timeout].positive?
+if options[:browser] && !options[:browser].between?(0, 65_535)
+  abort "error: --browser PORT must be 0-65535; got #{options[:browser]}"
+end
 
 warriors_dir = File.expand_path(options[:warriors])
 abort "error: #{warriors_dir} is not a directory" unless File.directory?(warriors_dir)
@@ -107,6 +114,23 @@ random       = options[:seed] ? Random.new(options[:seed]) : Random.new
 board        = RobotWars::Board.new(width: options[:width], height: options[:height])
 warrior_ids  = brain_files.map { |path| File.basename(path, ".md") }
 game         = RobotWars::Game.start(board: board, robot_ids: warrior_ids, life: options[:life], random: random)
+
+# The browser spectator (phase 2, initial cut): serve a frozen snapshot
+# of the starting board — grid plus each warrior's colored icon — from a
+# background thread, and open it in the default browser. The page is
+# captured before the match starts, so the server never reads game state
+# the match loop is mutating. The server dies with the process; the
+# rendered page stays visible in the browser after the match ends.
+if options[:browser]
+  page = RobotWars::SpectatorPage.new(game: game)
+  begin
+    spectator = RobotWars::SpectatorServer.new(html: page.to_html, port: options[:browser]).start
+  rescue SystemCallError => e
+    abort "error: could not start the spectator server on port #{options[:browser]} (#{e.message})"
+  end
+  puts "spectator view: #{spectator.url}"
+  RobotWars::BrowserOpener.new.call(spectator.url) || puts("could not launch a browser — open #{spectator.url} yourself")
+end
 
 # Resolve each warrior's "<provider>/<model id>" up front: --model wins
 # over front matter, front matter over nothing. RobotLab would otherwise

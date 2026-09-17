@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- `--browser [PORT]`: a browser spectator view of the match — the
+  initial cut serves a frozen snapshot of the starting board (SVG
+  grid, one colored robot icon per warrior, a color/life/square
+  legend) from a stdlib-only HTTP server (`SpectatorServer`) on a
+  background thread and opens it in the default browser
+  (`BrowserOpener`: `open`/`start`/`xdg-open`). Rendering is split
+  into `SvgBoard` (transparent-background SVG drawing) and
+  `SpectatorPage` (dark-themed HTML that snapshots the game at
+  construction, so serving never races the match loop).
 - RULES.md gained rules 41 (unparsable pilot reply = rule 21 solo
   conflict) and 42 (Battleship-style HIT/MISS attack feedback),
   documenting behavior already implemented.
