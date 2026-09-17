@@ -133,19 +133,34 @@ HEADER
 
 last_report = nil
 until game.over? || game.turn_number >= options[:max_turns]
-  actions = game.alive_robots.to_h do |robot|
-    # Battleship-style: an attacker is told on its NEXT turn whether
-    # last turn's shot found a robot (HIT) or an empty square (MISS).
+  # Every pilot's prompt goes out concurrently — the calls are
+  # I/O-bound waits, so a turn costs the slowest brain rather than the
+  # sum of all of them. Sensing reports are built up front on the main
+  # thread (they read shared game state); each thread then only talks
+  # to its own warrior's chat. Battleship-style: an attacker is told on
+  # its NEXT turn whether last turn's shot found a robot (HIT) or an
+  # empty square (MISS).
+  threads = game.alive_robots.to_h do |robot|
     sensing = RobotWars::SensingReport.new(
       game: game, robot: robot,
       attack_outcome: last_report&.attack_outcome_for(robot)
     ).to_s
 
-    begin
-      [robot, warriors.fetch(robot).decide(sensing)]
-    rescue StandardError => e
-      abort "error: #{robot.id}'s brain failed to respond (#{e.class}: #{e.message})"
+    thread = Thread.new do
+      # A brain failure is reported once, by the abort below — not as a
+      # raw stack trace the moment the thread dies.
+      Thread.current.report_on_exception = false
+      warriors.fetch(robot).decide(sensing)
     end
+    [robot, thread]
+  end
+
+  # Thread#value re-raises a failed brain's exception here, preserving
+  # the serial loop's abort behavior.
+  actions = threads.to_h do |robot, thread|
+    [robot, thread.value]
+  rescue StandardError => e
+    abort "error: #{robot.id}'s brain failed to respond (#{e.class}: #{e.message})"
   end
 
   # Origins must be read before resolution — afterward a robot may have
