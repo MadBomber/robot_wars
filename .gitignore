@@ -1,0 +1,16 @@
+/.bundle/
+/.yardoc
+/_yardoc/
+/coverage/
+/doc/
+/pkg/
+/spec/reports/
+/tmp/
+
+# Bundler lock (this is a library gem)
+/Gemfile.lock
+/Gemfile.local.lock
+
+# quality-gate artifacts (baseline + last run output)
+/.quality/
+*_output.txt

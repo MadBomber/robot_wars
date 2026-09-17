@@ -1,0 +1,10 @@
+# frozen_string_literal: true
+# robot_wars — turn-based last-robot-standing game on a 2D grid board.
+
+import_up "repo_dev.loki"
+
+class Tasks
+  @@gem_name ||= "robot_wars".freeze
+
+  header "robot_wars v#{gem_version} — last robot standing"
+end
