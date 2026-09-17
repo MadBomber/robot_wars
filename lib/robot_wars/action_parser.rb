@@ -10,6 +10,7 @@ module RobotWars
   # Anything that doesn't match becomes Action.invalid (RULES.md 21's
   # solo-conflict penalty, via TurnResolver) rather than raising — a
   # pilot's bad reply is a turn's mistake, not a crash.
+  # :reek:RepeatedConditional -- each parse_* method guards its own independent regex match; they only share a name.
   class ActionParser
     DIRECTIONS = {
       "north" => Direction::NORTH, "northeast" => Direction::NORTHEAST,

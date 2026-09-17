@@ -28,7 +28,7 @@ class RobotWars::LLMPilotTest < Minitest::Test
     assert_equal "sensing report text", llm_robot.received
   end
 
-  def test_an_unparseable_reply_becomes_an_invalid_action
+  def test_an_unparsable_reply_becomes_an_invalid_action
     pilot = RobotWars::LLMPilot.new(llm_robot: FakeLLMRobot.new("I refuse to choose."))
 
     assert_predicate pilot.decide("report"), :invalid?

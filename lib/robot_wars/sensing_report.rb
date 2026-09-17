@@ -47,10 +47,12 @@ module RobotWars
       (["Owned squares:"] + lines).join("\n")
     end
 
+    # :reek:ControlParameter -- comparing the owner against @robot is the method's entire purpose.
     def mine(owner)
       owner == @robot ? " (yours)" : ""
     end
 
+    # :reek:FeatureEnvy -- `survivors` is a local snapshot formatted in place; there is nowhere better for it.
     def survivors_text
       survivors = @game.alive_robots
       "#{survivors.size} warriors remain: #{survivors.map(&:id).join(', ')}."

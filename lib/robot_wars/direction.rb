@@ -1,6 +1,7 @@
 module RobotWars
   # The 8 one-square move directions (RULES.md 9: a robot moves like a
   # chess king).
+  # :reek:TooManyConstants -- 8 compass points plus their two lookup tables; the compass isn't getting bigger.
   module Direction
     OFFSETS = [
       Position.new(x: 0, y: -1),

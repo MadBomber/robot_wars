@@ -20,6 +20,8 @@ module RobotWars
       position.neighbors.select { |neighbor| on_board?(neighbor) }
     end
 
+    # :reek:NestedIterators -- a 2D grid walk is inherently two loops deep.
+    # :reek:UncommunicativeVariableName -- x and y ARE the communicative names for grid coordinates.
     def each_position
       return enum_for(:each_position) unless block_given?
 
@@ -34,6 +36,7 @@ module RobotWars
 
     # `count` distinct squares (RULES.md 6: no two robots share a
     # starting square).
+    # :reek:FeatureEnvy -- `squares` is a local snapshot of this board's own positions, not another object's data.
     def sample_positions(count, random: Random.new)
       squares = each_position.to_a
       raise ArgumentError, "cannot place #{count} robots on #{squares.size} squares" if count > squares.size

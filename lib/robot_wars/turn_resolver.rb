@@ -19,6 +19,8 @@ module RobotWars
       # :miss when it found the square empty, nil when it didn't attack.
       # Counter-fire and unchallenged-defense effects don't count — they
       # aren't the robot's own shot.
+      # :reek:ControlParameter -- `robot` is the query subject being looked up, not a behavior switch.
+      # :reek:FeatureEnvy -- `effect` is the block's own search variable; there is no better home for a Report query.
       def attack_outcome_for(robot)
         ranged_effects.find { |effect| effect.source == robot && %i[hit miss].include?(effect.kind) }&.kind
       end
@@ -50,6 +52,7 @@ module RobotWars
       def to_s = "solo conflict: #{robot.id} — roll #{roll}, no movement"
     end
 
+    # :reek:ControlParameter -- `x || Default.new` is an injectable-collaborator fallback, not behavior selection.
     def initialize(board:, occupancy:, territory:, roll_generator: RollGenerator.new, random: Random.new,
                    move_resolver: nil, conflict_resolver: nil, illegal_move_resolver: nil)
       @board = board
@@ -59,14 +62,16 @@ module RobotWars
       @move_resolver = move_resolver || MoveResolver.new(board: board, territory: territory)
       @conflict_resolver = conflict_resolver || ConflictResolver.new(roll_generator: roll_generator)
       @illegal_move_resolver = illegal_move_resolver || IllegalMoveResolver.new(roll_generator: roll_generator)
+      @conflicts = []
+      @solo_conflicts = []
+      @claims = []
     end
 
     # actions: Hash{Robot => Action}, exactly one entry per living robot
     # on the board (rule 8).
+    # :reek:TooManyStatements -- the rule 40 turn sequence, one linear step per phase; splitting it would hide the order.
     def resolve!(actions)
-      @conflicts = []
-      @solo_conflicts = []
-      @claims = []
+      reset_turn_log
       origins = actions.keys.to_h { |robot| [robot, @occupancy.position_of(robot)] }
 
       destinations = apply_movement_economy(actions)
@@ -84,12 +89,21 @@ module RobotWars
 
     private
 
+    # The per-turn event log the Report is built from, emptied at the
+    # top of every resolve!.
+    def reset_turn_log
+      @conflicts = []
+      @solo_conflicts = []
+      @claims = []
+    end
+
     # --- Movement and the life-point economy (rules 9-11, 21) ---------
 
     def apply_movement_economy(actions)
       actions.to_h { |robot, action| [robot, intended_square(robot, action)] }
     end
 
+    # :reek:FeatureEnvy -- dispatching on the action's type is this method's whole job; the Action is pure data.
     def intended_square(robot, action)
       origin = @occupancy.position_of(robot)
       return resolve_move(robot, origin, action.direction) if action.move?
@@ -121,6 +135,7 @@ module RobotWars
 
     # --- Square conflicts, cascading returns, displacement (13-20) ----
 
+    # :reek:TooManyStatements -- initial-conflict pass plus the cascading-return queue drain belong together (rules 13-20).
     def resolve_square_conflicts(destinations, origins)
       settled = {}
       eliminated = []
@@ -146,24 +161,25 @@ module RobotWars
     # Resolves one square's contenders: the sole robot, or the winner of
     # a conflict, settles there and (on conquest) claims it; every loser
     # is queued to attempt its own return.
+    # :reek:TooManyStatements -- fight, log, settle-or-vacate, queue losers: one linear pass per contested square.
     def settle(square, contenders, settled, defeats, queue)
       if contenders.one?
         settled[square] = contenders.first
         return
       end
 
-      result = @conflict_resolver.resolve(contenders)
-      @conflicts << Conflict.new(square: square, robots: contenders, roll: result.roll,
-                                 winner: result.winner, losers: result.losers)
+      @conflict_resolver.resolve(contenders) => { winner:, losers:, roll: }
+      @conflicts << Conflict.new(square: square, robots: contenders, roll: roll,
+                                 winner: winner, losers: losers)
 
-      if result.winner
-        settled[square] = result.winner
-        record_conquest(square, result.winner)
+      if winner
+        settled[square] = winner
+        record_conquest(square, winner)
       else
         settled.delete(square)
       end
 
-      result.losers.each do |loser|
+      losers.each do |loser|
         defeats[loser] += 1
         queue << { robot: loser, lost_at: square }
       end
@@ -177,6 +193,8 @@ module RobotWars
       @claims << Claim.new(robot: winner, square: square)
     end
 
+    # :reek:LongParameterList -- the cascade's working state (origins/settled/defeats/eliminated/queue) is one
+    # turn's transient data; promoting it to ivars or a context object would outlive its single resolve! pass.
     def return_home(robot, lost_at, origins, settled, defeats, eliminated, queue)
       home = origins[robot]
 

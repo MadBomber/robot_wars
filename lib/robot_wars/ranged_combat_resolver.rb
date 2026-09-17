@@ -22,6 +22,7 @@ module RobotWars
 
     private
 
+    # :reek:FeatureEnvy -- an AttackOrder is pure data; resolving it needs this resolver's occupancy map and defense table.
     def resolve_attack(attack, defense_by_defender, attacked_defenders)
       target = @occupancy_map.robot_at(attack.square)
       return [miss(attack)] unless target
