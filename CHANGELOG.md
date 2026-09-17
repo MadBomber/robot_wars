@@ -26,7 +26,10 @@
   the booth — `Announcer` (an LLM persona with its own chat history
   for cross-turn continuity) narrates the lineup, every turn's recap,
   brain-dead removals, and the final result; `SaySpeaker` speaks each
-  call aloud through macOS's `say`. The persona is an announcer brain
+  call aloud through the platform's text-to-speech (`say` on macOS,
+  PowerShell's System.Speech on Windows, the first available of
+  `spd-say`/`espeak-ng`/`espeak` on Linux — silent with a one-time
+  warning when none is installed). The persona is an announcer brain
   template editable like any warrior's: the gem's shipped
   `examples/warriors/_announcer.md` by default (front matter picks
   `lms/openai/gpt-oss-20b` and temperature), or any file via

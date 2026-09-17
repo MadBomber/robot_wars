@@ -45,8 +45,9 @@ options = { warriors: default_warriors, width: 10, height: 10, max_turns: 500, s
 warriors_help  = "Directory of *.md warrior brain templates (default: the gem's examples/warriors)"
 timeout_help   = "Seconds a pilot may take to answer each turn before it is declared brain dead " \
                  "and its robot removed from the match (default: #{options[:timeout].to_i})"
-announcer_help = "Add a radio play-by-play announcer who speaks each turn aloud through macOS's " \
-                 "`say`. FILE is your own announcer brain template " \
+announcer_help = "Add a radio play-by-play announcer who speaks each turn aloud through the " \
+                 "platform's text-to-speech (macOS say, Windows System.Speech, Linux spd-say/espeak). " \
+                 "FILE is your own announcer brain template " \
                  "(default: the gem's examples/warriors/_announcer.md)"
 
 parser = OptionParser.new do |opts|

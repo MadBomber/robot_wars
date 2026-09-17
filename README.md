@@ -107,8 +107,10 @@ stalemates.
 
 Pass `--announcer` to put a radio play-by-play announcer in the booth:
 an LLM persona that narrates the lineup, every turn's recap, and the
-final result — and speaks each call aloud through macOS's `say`. Its
-brain is a template editable exactly like a warrior's: the gem's
+final result — and speaks each call aloud through the platform's
+text-to-speech (`say` on macOS, PowerShell's System.Speech on Windows,
+`spd-say`/`espeak-ng`/`espeak` on Linux). Its brain is a template
+editable exactly like a warrior's: the gem's
 shipped `examples/warriors/_announcer.md` by default (front matter
 picks `lms/openai/gpt-oss-20b`), or your own file anywhere via
 `--announcer path/to/my_announcer.md`. The match runs at broadcast
