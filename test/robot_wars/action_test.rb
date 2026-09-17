@@ -77,7 +77,7 @@ class RobotWars::ActionTest < Minitest::Test
   def test_describe_anchors_move_to_its_intended_destination
     action = RobotWars::Action.move(RobotWars::Direction::SOUTHEAST)
 
-    assert_equal "MOVE southeast to (7,8)", action.describe(RobotWars::Position.new(x: 6, y: 7))
+    assert_equal "MOVE southeast to (7,6)", action.describe(RobotWars::Position.new(x: 6, y: 7))
   end
 
   def test_describe_leaves_the_other_actions_as_their_grammar_line

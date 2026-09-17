@@ -3,10 +3,12 @@ require "erb"
 module RobotWars
   # Draws the game board as an SVG: the bounded grid (RULES.md 1) with
   # coordinate labels matching the transcript's (x,y) notation, and one
-  # colored robot icon per occupied square. North is up: y grows
-  # southward (Direction::NORTH is y-1), which is also SVG's natural
-  # coordinate direction. The drawing has a transparent background —
-  # whatever hosts it (SpectatorPage's dark theme) shows through.
+  # colored robot icon per occupied square. The board is a standard
+  # math plot (RULES.md 47): square (0,0) sits at the BOTTOM left and y
+  # grows north, so board rows are flipped when mapped onto SVG's
+  # top-down pixel rows — north stays up on screen. The drawing has a
+  # transparent background — whatever hosts it (SpectatorPage's dark
+  # theme) shows through.
   class SvgBoard
     # One icon to draw: a robot's id, its board square, its color, and
     # (when known) its life points to print beside it.
@@ -25,8 +27,8 @@ module RobotWars
     PALETTE = %w[#4fc3f7 #ff8a65 #81c784 #ba68c8 #ffd54f #f06292 #4db6ac #a1887f #90a4ae #dce775].freeze
 
     CELL        = 48 # px per board square
-    MARGIN      = 28 # room for the coordinate labels (left and top)
-    PAD         = 8  # right/bottom breathing room past the last grid line
+    MARGIN      = 28 # room for the coordinate labels (left and bottom)
+    PAD         = 8  # top/right breathing room past the grid lines
     GRID_COLOR  = "#3d444d".freeze
     LABEL_COLOR = "#8b949e".freeze
     EYE_COLOR   = "#10151b".freeze
@@ -59,7 +61,12 @@ module RobotWars
     private
 
     def pixel_width  = MARGIN + (@width * CELL) + PAD
-    def pixel_height = MARGIN + (@height * CELL) + PAD
+    def pixel_height = PAD + (@height * CELL) + MARGIN
+
+    # The grid hangs from a thin top pad; the label band sits BELOW it,
+    # next to the origin row — matching rule 47's bottom-left (0,0).
+    def grid_top    = PAD
+    def grid_bottom = PAD + (@height * CELL)
 
     # Owned squares wear their owner's color as a translucent wash —
     # under the grid lines, so the lattice stays crisp.
@@ -67,7 +74,7 @@ module RobotWars
     def territory_rects
       @owned.map do |square|
         square => { x:, y:, color: }
-        %(<rect x="#{MARGIN + (x * CELL)}" y="#{MARGIN + (y * CELL)}" ) +
+        %(<rect x="#{MARGIN + (x * CELL)}" y="#{center_y(y) - (CELL / 2)}" ) +
           %(width="#{CELL}" height="#{CELL}" fill="#{color}" fill-opacity="0.22"/>)
       end
     end
@@ -76,10 +83,9 @@ module RobotWars
 
     # :reek:UncommunicativeVariableName -- x IS the communicative name for a grid coordinate.
     def vertical_lines
-      bottom = MARGIN + (@height * CELL)
       (0..@width).map do |column|
         x = MARGIN + (column * CELL)
-        %(<line x1="#{x}" y1="#{MARGIN}" x2="#{x}" y2="#{bottom}" stroke="#{GRID_COLOR}"/>)
+        %(<line x1="#{x}" y1="#{grid_top}" x2="#{x}" y2="#{grid_bottom}" stroke="#{GRID_COLOR}"/>)
       end
     end
 
@@ -87,33 +93,37 @@ module RobotWars
     def horizontal_lines
       right = MARGIN + (@width * CELL)
       (0..@height).map do |row|
-        y = MARGIN + (row * CELL)
+        y = grid_top + (row * CELL)
         %(<line x1="#{MARGIN}" y1="#{y}" x2="#{right}" y2="#{y}" stroke="#{GRID_COLOR}"/>)
       end
     end
 
     def axis_labels
       columns = (0...@width).map do |column|
-        %(<text x="#{center(column)}" y="#{MARGIN - 8}" text-anchor="middle" #{label_font}>#{column}</text>)
+        %(<text x="#{center_x(column)}" y="#{grid_bottom + 18}" text-anchor="middle" #{label_font}>#{column}</text>)
       end
       rows = (0...@height).map do |row|
-        %(<text x="#{MARGIN - 8}" y="#{center(row) + 4}" text-anchor="end" #{label_font}>#{row}</text>)
+        %(<text x="#{MARGIN - 8}" y="#{center_y(row) + 4}" text-anchor="end" #{label_font}>#{row}</text>)
       end
       columns + rows
     end
 
     def label_font = %(font-family="#{FONT}" font-size="11" fill="#{LABEL_COLOR}")
 
-    # The pixel center of board coordinate n along either axis.
-    def center(coordinate) = MARGIN + (coordinate * CELL) + (CELL / 2)
+    # The pixel center of a board column.
+    def center_x(column) = MARGIN + (column * CELL) + (CELL / 2)
+
+    # The pixel center of a board row — flipped, because board y grows
+    # north (up) while SVG pixel y grows down.
+    def center_y(row) = grid_top + ((@height - 1 - row) * CELL) + (CELL / 2)
 
     # A robot: antenna, round head, two eyes, and its id beneath — all in
     # the robot's own color so the icon alone identifies it.
     # :reek:FeatureEnvy -- drawing an icon means reading every one of its fields; there is nowhere better for this to live.
     def icon_svg(icon)
       icon => { x:, y:, color:, life: }
-      cx = center(x)
-      cy = center(y)
+      cx = center_x(x)
+      cy = center_y(y)
       id = ERB::Util.html_escape(icon.id)
       <<~ICON.chomp
         <g>

@@ -100,7 +100,9 @@ class RobotWars::SpectatorPageTest < Minitest::Test
 
     cell = RobotWars::SvgBoard::CELL
     margin = RobotWars::SvgBoard::MARGIN
-    assert_includes svg, %(<rect x="#{margin + (3 * cell)}" y="#{margin + (3 * cell)}" width="#{cell}" height="#{cell}" ) +
+    pad = RobotWars::SvgBoard::PAD
+    # y=3 is the TOP row of the height-4 board (rule 47: y grows north).
+    assert_includes svg, %(<rect x="#{margin + (3 * cell)}" y="#{pad}" width="#{cell}" height="#{cell}" ) +
                          %(fill="#{RobotWars::SvgBoard.color_for(1)}" fill-opacity="0.22"/>)
   end
 

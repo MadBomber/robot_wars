@@ -113,8 +113,10 @@ text-to-speech (`say` on macOS, PowerShell's System.Speech on Windows,
 editable exactly like a warrior's: the gem's
 shipped `examples/warriors/_announcer.md` by default (front matter
 picks `lms/openai/gpt-oss-20b`), or your own file anywhere via
-`--announcer path/to/my_announcer.md`. The match runs at broadcast
-pace: each turn waits for the commentary to finish.
+`--announcer path/to/my_announcer.md`. The booth runs on its own
+thread, so the match plays at pilot speed while the commentary
+happens concurrently — and when the action outruns the announcer,
+the booth catches up by calling the missed turns in one breath.
 
 Pass `--browser` to watch the match live in a web browser: a
 spectator page served from a background thread (no extra

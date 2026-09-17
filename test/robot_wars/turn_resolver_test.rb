@@ -13,7 +13,7 @@ class RobotWars::TurnResolverTest < Minitest::Test
     resolve(robot => RobotWars::Action.move(RobotWars::Direction::NORTH))
 
     assert_equal 99, robot.life
-    assert_equal pos(1, 0), @occupancy.position_of(robot)
+    assert_equal pos(1, 2), @occupancy.position_of(robot)
   end
 
   def test_staying_adds_1_life_and_does_not_move
@@ -223,7 +223,7 @@ class RobotWars::TurnResolverTest < Minitest::Test
     resolver = turn_resolver(conflict_resolver: conflict_resolver(rolls: [5, 3]))
     report = resolver.resolve!(
       a => RobotWars::Action.move(RobotWars::Direction::EAST),
-      b => RobotWars::Action.move(RobotWars::Direction::NORTH),
+      b => RobotWars::Action.move(RobotWars::Direction::SOUTH),
       c => RobotWars::Action.move(RobotWars::Direction::WEST),
       d => RobotWars::Action.stay
     )
@@ -260,7 +260,7 @@ class RobotWars::TurnResolverTest < Minitest::Test
     resolver = turn_resolver(conflict_resolver: conflict_resolver(rolls: [5, 3]))
     report = resolver.resolve!(
       a => RobotWars::Action.move(RobotWars::Direction::EAST),
-      b => RobotWars::Action.move(RobotWars::Direction::NORTHWEST),
+      b => RobotWars::Action.move(RobotWars::Direction::SOUTHWEST),
       c => RobotWars::Action.move(RobotWars::Direction::WEST),
       d => RobotWars::Action.move(RobotWars::Direction::WEST),
       z => RobotWars::Action.stay
@@ -462,7 +462,7 @@ class RobotWars::TurnResolverTest < Minitest::Test
 
     declared = report.events.grep(RobotWars::TurnResolver::Declared)
     assert_equal(%w[mover sitter], declared.map { |event| event.robot.id })
-    assert_equal "mover: MOVE north to (1,0)", declared.first.to_s
+    assert_equal "mover: MOVE north to (1,2)", declared.first.to_s
     assert_equal({ type: :action, robot: "mover", action: "MOVE north", origin: { x: 1, y: 1 } },
                  declared.first.to_h)
   end

@@ -11,6 +11,11 @@ whether that attack was a HIT (a robot was on the square) or a MISS
 rivals are.
 
 The rules, in brief:
+- The board is a standard X,Y plot: square (0,0) is the SOUTHWEST
+  corner, x grows EAST and y grows NORTH. MOVE north lands on
+  (x, y+1), south on (x, y-1), east on (x+1, y), west on (x-1, y);
+  diagonals combine accordingly. On a W by H board the squares run
+  from (0,0) up to (W-1, H-1), the northeast corner.
 - 8-way movement, one square per turn, like a chess king. Moving costs
   1 life; staying still gains 1 life.
 - An illegal move — off the board, or onto a square someone else

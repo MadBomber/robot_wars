@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+- Rule 47 (ruled by Dewayne): the board is a standard math plot —
+  square (0,0) is the southwest corner, x grows east, y grows north,
+  so `MOVE north` lands on (x, y+1). `Direction`'s y-axis flipped
+  (N/S and the NE/SE, NW/SW diagonal pairs swapped offsets), the
+  browser spectator now draws (0,0) at the bottom left with row
+  labels counting up from the bottom (north still renders upward),
+  and the pilots' rules recap (`game_rules.md`) states the
+  convention explicitly — previously a pilot had no way to know
+  which way y grew. The board's x-coordinate labels also moved from
+  above the grid to below it, so both axes read off the origin
+  corner like a standard plot.
+- The announcer no longer slows the match: `Booth` runs the announcer
+  on its own worker thread, so `--announcer` commentary (LLM call +
+  speech) happens concurrently with the turns and the browser stream.
+  Announcements never overlap (one serial worker) and stay in order;
+  a booth that falls behind coalesces everything queued into one
+  catch-up call so commentary tracks the live board instead of
+  narrating history. A failing announcer is warned about and dropped
+  rather than ending the match, and the finale is fully spoken before
+  the process exits.
 - The turn-event stream: `TurnResolver::Report#events` is the ordered,
   typed record of everything a turn did — declared actions, solo
   conflicts, conflicts, displacements, ranged effects, deaths, and

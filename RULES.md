@@ -4,7 +4,8 @@ Numbered for reference. Rules 1–40 are decided (proposed defaults
 approved by Dewayne 2026-09-16). Two sensing details remain open under
 rule 35. Rules 41–46 were added 2026-09-17 (41–42 documenting behavior
 already implemented at Dewayne's direction; 43–46 and the rule 18
-amendment ruled by Dewayne 2026-09-17). See `notes.md` for the
+amendment ruled by Dewayne 2026-09-17). Rule 47 (the coordinate
+convention) was ruled by Dewayne 2026-09-17. See `notes.md` for the
 discussion history behind each rule.
 
 ## Board and Setup
@@ -171,3 +172,13 @@ discussion history behind each rule.
     defense does not resolve. A robot dead at the moment it would win
     a conflict wins nothing. Deaths within a single resolution step
     remain simultaneous (rule 38).
+
+## Coordinates
+
+47. The board is a standard math plot: square (0,0) is the SOUTHWEST
+    corner, x grows to the EAST, and y grows to the NORTH. So a move
+    north lands on (x, y+1), south on (x, y-1), east on (x+1, y), and
+    west on (x-1, y); the diagonals combine accordingly (northeast is
+    (x+1, y+1), and so on). On a width W by height H board the legal
+    squares run from (0,0) to (W-1, H-1), with (W-1, H-1) the
+    northeast corner.

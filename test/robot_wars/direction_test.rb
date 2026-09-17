@@ -19,8 +19,16 @@ class RobotWars::DirectionTest < Minitest::Test
     end
   end
 
-  def test_north_moves_up
-    assert_equal RobotWars::Position.new(x: 0, y: -1), RobotWars::Direction::NORTH
+  # Rule 47: standard math plot — y grows north, x grows east.
+  def test_north_increases_y_and_east_increases_x
+    assert_equal RobotWars::Position.new(x: 0, y: 1), RobotWars::Direction::NORTH
+    assert_equal RobotWars::Position.new(x: 0, y: -1), RobotWars::Direction::SOUTH
+    assert_equal RobotWars::Position.new(x: 1, y: 0), RobotWars::Direction::EAST
+    assert_equal RobotWars::Position.new(x: -1, y: 0), RobotWars::Direction::WEST
+    assert_equal RobotWars::Position.new(x: 1, y: 1), RobotWars::Direction::NORTHEAST
+    assert_equal RobotWars::Position.new(x: 1, y: -1), RobotWars::Direction::SOUTHEAST
+    assert_equal RobotWars::Position.new(x: -1, y: -1), RobotWars::Direction::SOUTHWEST
+    assert_equal RobotWars::Position.new(x: -1, y: 1), RobotWars::Direction::NORTHWEST
   end
 
   def test_name_of_names_every_offset

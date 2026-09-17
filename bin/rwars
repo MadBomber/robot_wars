@@ -23,9 +23,9 @@ require "optparse"
 require "robot_wars"
 
 # The transcript is watched live (and each turn can stall for seconds
-# on pilot LLM calls or the announcer's speech), so lines must land the
-# moment they're printed — even when stdout is a pipe or a file, where
-# Ruby would otherwise block-buffer whole turns.
+# on pilot LLM calls), so lines must land the moment they're printed —
+# even when stdout is a pipe or a file, where Ruby would otherwise
+# block-buffer whole turns.
 $stdout.sync = true
 
 # Each warrior's own *.md front matter picks its brain: the `model:`
@@ -194,17 +194,19 @@ end
 # The announcer is not a combatant: no sensing reports, never in the
 # roster — its persona is its brain template's body and its message is
 # each turn's printed recap. Its RobotLab chat keeps history, so the
-# commentary can carry rivalries and momentum across turns. Each call
-# blocks until `say` finishes: the match runs at broadcast pace.
-announcer = nil
+# commentary can carry rivalries and momentum across turns. The Booth
+# runs it on its own thread: the match plays at pilot speed while the
+# commentary happens concurrently, and a booth that falls behind
+# catches up by calling several queued turns in one breath.
+booth = nil
 if announcer_brain
-  booth_options = { name: "announcer", system_prompt: announcer_brain.body }
-  booth_options[:temperature] = announcer_brain.temperature if announcer_brain.temperature
+  build_announcer = { name: "announcer", system_prompt: announcer_brain.body }
+  build_announcer[:temperature] = announcer_brain.temperature if announcer_brain.temperature
   if announcer_spec
-    booth_options[:model]    = announcer_spec.model
-    booth_options[:provider] = announcer_spec.provider if announcer_spec.provider
+    build_announcer[:model]    = announcer_spec.model
+    build_announcer[:provider] = announcer_spec.provider if announcer_spec.provider
   end
-  announcer = RobotWars::Announcer.new(llm_robot: RobotLab.build(**booth_options))
+  booth = RobotWars::Booth.new(announcer: RobotWars::Announcer.new(llm_robot: RobotLab.build(**build_announcer)))
 end
 
 header = <<~HEADER
@@ -214,7 +216,7 @@ HEADER
 puts header
 spectator_log.concat(header.lines.map(&:chomp))
 broadcast.call
-announcer&.announce(header)
+booth&.announce(header)
 
 last_report = nil
 until game.over? || game.turn_number >= options[:max_turns]
@@ -262,7 +264,7 @@ until game.over? || game.turn_number >= options[:max_turns]
       puts obituary
       spectator_log << obituary
       broadcast.call
-      announcer&.announce(obituary)
+      booth&.announce(obituary)
     end
   end
   next if game.over?
@@ -276,7 +278,7 @@ until game.over? || game.turn_number >= options[:max_turns]
   puts recap
   spectator_log.concat(recap)
   broadcast.call(report: report)
-  announcer&.announce(recap.join("\n"))
+  booth&.announce(recap.join("\n"))
   last_report = report
 end
 
@@ -291,7 +293,9 @@ puts "---"
 puts finale
 spectator_log << "---" << finale
 broadcast.call(final: true)
-announcer&.announce(finale)
-# Drains every spectator's queue (the final update included) before the
-# process goes away; the finished page stays on screen in the browser.
+booth&.announce(finale)
+# Drain both broadcasters before the process goes away: every
+# spectator gets the final update (the finished page stays on screen
+# in the browser), and the booth finishes calling the match.
 spectator&.stop
+booth&.close

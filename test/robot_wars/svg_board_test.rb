@@ -29,10 +29,15 @@ class RobotWars::SvgBoardTest < Minitest::Test
   def test_axis_labels_number_every_column_and_row
     svg = RobotWars::SvgBoard.new(width: 3, height: 2).to_s
 
-    # Column labels 0..2 across the top, row labels 0..1 down the left.
+    # Column labels 0..2 BELOW the grid; row labels 0..1 up the left —
+    # rule 47: row 0 is the SOUTH (bottom) row, and the x-axis reads
+    # where an x-axis belongs, under the origin row.
     assert_equal 3 + 2, svg.scan("<text").size
-    assert_includes svg, %(<text x="#{MARGIN + (2 * CELL) + (CELL / 2)}" y="#{MARGIN - 8}" text-anchor="middle")
-    assert_includes svg, %(<text x="#{MARGIN - 8}" y="#{MARGIN + CELL + (CELL / 2) + 4}" text-anchor="end")
+    below_grid = PAD + (2 * CELL) + 18
+    assert_includes svg, %(<text x="#{MARGIN + (2 * CELL) + (CELL / 2)}" y="#{below_grid}" text-anchor="middle")
+    assert_includes svg, %(<text x="#{MARGIN - 8}" y="#{PAD + CELL + (CELL / 2) + 4}" text-anchor="end" ) +
+                         %(font-family="#{RobotWars::SvgBoard::FONT}" font-size="11" ) +
+                         %(fill="#{RobotWars::SvgBoard::LABEL_COLOR}">0</text>)
   end
 
   def test_a_robot_icon_is_drawn_at_its_cell_center_in_its_color
@@ -40,10 +45,18 @@ class RobotWars::SvgBoardTest < Minitest::Test
     svg = RobotWars::SvgBoard.new(width: 3, height: 2, icons: [icon]).to_s
 
     cx = MARGIN + (2 * CELL) + (CELL / 2)
-    cy = MARGIN + (1 * CELL) + (CELL / 2)
+    cy = PAD + (CELL / 2) # y=1 is the TOP row of a height-2 board (rule 47)
     assert_includes svg, %(<circle cx="#{cx}" cy="#{cy}" r="14" fill="#4fc3f7"/>)
     assert_includes svg, %(<title>alpha at (2,1)</title>)
     assert_includes svg, %(fill="#4fc3f7">alpha</text>)
+  end
+
+  def test_the_origin_square_is_drawn_at_the_bottom_left
+    icon = RobotWars::SvgBoard::Icon.new(id: "sw", x: 0, y: 0, color: "#4fc3f7")
+    svg = RobotWars::SvgBoard.new(width: 2, height: 3, icons: [icon]).to_s
+
+    bottom_row_center = PAD + (2 * CELL) + (CELL / 2)
+    assert_includes svg, %(<circle cx="#{MARGIN + (CELL / 2)}" cy="#{bottom_row_center}" r="14" fill="#4fc3f7"/>)
   end
 
   def test_an_icon_with_life_prints_it_beside_the_head_and_in_the_tooltip
@@ -58,7 +71,7 @@ class RobotWars::SvgBoardTest < Minitest::Test
     owned = RobotWars::SvgBoard::OwnedSquare.new(x: 1, y: 0, color: "#81c784")
     svg = RobotWars::SvgBoard.new(width: 2, height: 1, owned: [owned]).to_s
 
-    rect = %(<rect x="#{MARGIN + CELL}" y="#{MARGIN}" width="#{CELL}" height="#{CELL}" fill="#81c784" fill-opacity="0.22"/>)
+    rect = %(<rect x="#{MARGIN + CELL}" y="#{PAD}" width="#{CELL}" height="#{CELL}" fill="#81c784" fill-opacity="0.22"/>)
     assert_includes svg, rect
     assert_operator svg.index(rect), :<, svg.index("<line"), "territory must be painted under the grid lines"
   end
