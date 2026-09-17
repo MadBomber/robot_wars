@@ -15,7 +15,7 @@ module RobotWars
     # max-turns stop), telling the page to close its event stream.
     # :reek:BooleanParameter :reek:ControlParameter -- final is a recorded fact carried into the payload, not a behavior switch.
     def initialize(game:, roster:, log_lines:, events: [], final: false)
-      @page = SpectatorPage.new(game: game, roster: roster)
+      @page = SpectatorPage.new(game: game, roster: roster, events: events)
       @turn = game.turn_number
       @over = game.over? || final
       @log_lines = log_lines.dup

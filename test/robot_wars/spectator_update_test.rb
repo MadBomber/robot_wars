@@ -26,6 +26,16 @@ class RobotWars::SpectatorUpdateTest < Minitest::Test
     assert_equal(%w[action action], payload.fetch("events").map { |event| event.fetch("type") })
   end
 
+  def test_the_boards_svg_animates_the_turns_attacks
+    game = build_game
+    attack = RobotWars::Action.attack(square: RobotWars::Position.new(x: 3, y: 3), points: 5)
+    report = game.play_turn({ game.robot("alpha") => attack, game.robot("bravo") => RobotWars::Action.stay })
+
+    update = RobotWars::SpectatorUpdate.new(game: game, roster: game.robots, log_lines: [], events: report.events)
+
+    assert_includes JSON.parse(update.to_json).fetch("board_svg"), %(class="shot-line")
+  end
+
   def test_log_lines_are_html_escaped
     update = RobotWars::SpectatorUpdate.new(game: build_game, roster: nil, log_lines: ["<script>"])
 

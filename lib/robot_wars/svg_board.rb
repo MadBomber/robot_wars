@@ -22,6 +22,18 @@ module RobotWars
     # One owned square to shade in its owner's color.
     OwnedSquare = Data.define(:x, :y, :color)
 
+    # One attack to animate: a tracer from the attacker's square to the
+    # shelled square, with a splash where it lands. `hit` brightens the
+    # splash; a miss splashes dimly on the empty square. `counter` marks
+    # counter-fire, animated on a delay so it reads as the response it
+    # is: the attack lands first, then the return fire draws back.
+    Shot = Data.define(:from_x, :from_y, :to_x, :to_y, :color, :hit, :counter) do
+      # :reek:BooleanParameter -- hit and counter are recorded facts carried into the drawing, not behavior switches.
+      def initialize(from_x:, from_y:, to_x:, to_y:, color:, hit: false, counter: false)
+        super
+      end
+    end
+
     # Distinct hues that stay readable on a dark background; assigned to
     # robots by roster index, cycling when a match outgrows the palette.
     PALETTE = %w[#4fc3f7 #ff8a65 #81c784 #ba68c8 #ffd54f #f06292 #4db6ac #a1887f #90a4ae #dce775].freeze
@@ -40,11 +52,13 @@ module RobotWars
     # @param height [Integer] board squares down
     # @param icons [Array<Icon>] the robots to draw
     # @param owned [Array<OwnedSquare>] territory to shade
-    def initialize(width:, height:, icons: [], owned: [])
+    # @param shots [Array<Shot>] this turn's attacks to animate
+    def initialize(width:, height:, icons: [], owned: [], shots: [])
       @width = width
       @height = height
       @icons = icons
       @owned = owned
+      @shots = shots
     end
 
     def to_s
@@ -54,6 +68,7 @@ module RobotWars
         #{grid_lines.join("\n")}
         #{axis_labels.join("\n")}
         #{@icons.map { |icon| icon_svg(icon) }.join("\n")}
+        #{shot_layer}
         </svg>
       SVG
     end
@@ -136,6 +151,60 @@ module RobotWars
         #{life_text(cx, cy, color, life)}<text x="#{cx}" y="#{cy + 23}" text-anchor="middle" font-family="#{FONT}" font-size="9" fill="#{color}">#{id}</text>
         </g>
       ICON
+    end
+
+    # Shots land ABOVE the icons — a tracer over the battlefield — and
+    # bring their animation style along only when there is something to
+    # animate. An off-board shot keeps its tracer (the viewBox clips it
+    # at the edge) and its splash lands out of sight, which is the story.
+    def shot_layer
+      return "" if @shots.empty?
+
+      ([shot_style] + @shots.map { |shot| shot_svg(shot) }).join("\n")
+    end
+
+    # The attack animation, embedded so it travels with the drawing: the
+    # tracer draws itself toward the target, the splash pops on impact,
+    # both hold for a beat, and both fade to nothing (fill-mode keeps
+    # them invisible after). CSS animations restart whenever the SVG is
+    # (re)inserted into the DOM, so every turn's board swap replays only
+    # that turn's shots — no script required.
+    def shot_style
+      <<~CSS_SVG.chomp
+        <style>
+        .shot-line { stroke-dasharray: 1; stroke-dashoffset: 1;
+                     animation: shot-draw .18s ease-out forwards, shot-fade .3s ease-in .9s forwards; }
+        .shot-splash { opacity: 0; transform-box: fill-box; transform-origin: center;
+                       animation: shot-splash 1s ease-out .18s forwards; }
+        @keyframes shot-draw { to { stroke-dashoffset: 0; } }
+        @keyframes shot-fade { to { opacity: 0; } }
+        @keyframes shot-splash {
+          0% { opacity: var(--splash-opacity, .9); transform: scale(.2); }
+          35% { transform: scale(1); }
+          70% { opacity: var(--splash-opacity, .9); transform: scale(1); }
+          100% { opacity: 0; transform: scale(1.15); }
+        }
+        .shot-counter .shot-line { animation-delay: .5s, 1.3s; }
+        .shot-counter .shot-splash { animation-delay: .68s; }
+        </style>
+      CSS_SVG
+    end
+
+    # :reek:FeatureEnvy -- drawing a shot means reading every one of its fields; see icon_svg.
+    # :reek:UncommunicativeVariableName -- x2/y2 ARE the communicative names for the tracer's endpoint.
+    def shot_svg(shot)
+      shot => { from_x:, from_y:, to_x:, to_y:, color:, hit:, counter: }
+      x2 = center_x(to_x)
+      y2 = center_y(to_y)
+      <<~SHOT.chomp
+        <g#{' class="shot-counter"' if counter}>
+        <line class="shot-line" x1="#{center_x(from_x)}" y1="#{center_y(from_y)}" x2="#{x2}" y2="#{y2}" pathLength="1" stroke="#{color}" stroke-width="2.5" stroke-linecap="round"/>
+        <g class="shot-splash" style="--splash-opacity:#{hit ? '.9' : '.45'}">
+        <circle cx="#{x2}" cy="#{y2}" r="18" fill="none" stroke="#{color}" stroke-width="2.5"/>
+        <circle cx="#{x2}" cy="#{y2}" r="6" fill="#{color}"/>
+        </g>
+        </g>
+      SHOT
     end
 
     # The life count in the cell's top-right corner, next to the head.

@@ -84,6 +84,57 @@ class RobotWars::SvgBoardTest < Minitest::Test
     assert_includes svg, "&lt;sneaky&gt;"
   end
 
+  def test_a_shot_draws_an_animated_tracer_from_attacker_to_target_with_a_splash
+    shot = RobotWars::SvgBoard::Shot.new(from_x: 0, from_y: 0, to_x: 2, to_y: 1, color: "#ff8a65", hit: true)
+    svg = RobotWars::SvgBoard.new(width: 3, height: 2, shots: [shot]).to_s
+
+    x1 = MARGIN + (CELL / 2)
+    y1 = PAD + CELL + (CELL / 2) # y=0 is the BOTTOM row of a height-2 board (rule 47)
+    x2 = MARGIN + (2 * CELL) + (CELL / 2)
+    y2 = PAD + (CELL / 2)
+    assert_includes svg, %(<line class="shot-line" x1="#{x1}" y1="#{y1}" x2="#{x2}" y2="#{y2}" pathLength="1" stroke="#ff8a65")
+    assert_includes svg, %(<g class="shot-splash" style="--splash-opacity:.9">)
+    assert_includes svg, %(<circle cx="#{x2}" cy="#{y2}" r="18" fill="none" stroke="#ff8a65")
+    assert_includes svg, "@keyframes shot-draw"
+  end
+
+  def test_a_missed_shot_splashes_dimly
+    shot = RobotWars::SvgBoard::Shot.new(from_x: 0, from_y: 0, to_x: 1, to_y: 0, color: "#4fc3f7")
+    svg = RobotWars::SvgBoard.new(width: 2, height: 1, shots: [shot]).to_s
+
+    assert_includes svg, "--splash-opacity:.45"
+  end
+
+  def test_a_counter_fire_shot_is_marked_for_the_delayed_animation
+    shot = RobotWars::SvgBoard::Shot.new(from_x: 1, from_y: 0, to_x: 0, to_y: 0, color: "#81c784", hit: true, counter: true)
+    svg = RobotWars::SvgBoard.new(width: 2, height: 1, shots: [shot]).to_s
+
+    assert_includes svg, %(<g class="shot-counter">)
+    assert_includes svg, ".shot-counter .shot-line { animation-delay:"
+  end
+
+  def test_a_plain_shot_is_not_marked_as_counter_fire
+    shot = RobotWars::SvgBoard::Shot.new(from_x: 1, from_y: 0, to_x: 0, to_y: 0, color: "#81c784", hit: true)
+    svg = RobotWars::SvgBoard.new(width: 2, height: 1, shots: [shot]).to_s
+
+    refute_includes svg, %(class="shot-counter")
+  end
+
+  def test_a_board_without_shots_carries_no_shot_markup_or_style
+    svg = RobotWars::SvgBoard.new(width: 2, height: 1).to_s
+
+    refute_includes svg, "shot-line"
+    refute_includes svg, "<style>"
+  end
+
+  def test_shots_are_drawn_over_the_robot_icons
+    icon = RobotWars::SvgBoard::Icon.new(id: "alpha", x: 0, y: 0, color: "#4fc3f7")
+    shot = RobotWars::SvgBoard::Shot.new(from_x: 1, from_y: 0, to_x: 0, to_y: 0, color: "#ff8a65", hit: true)
+    svg = RobotWars::SvgBoard.new(width: 2, height: 1, icons: [icon], shots: [shot]).to_s
+
+    assert_operator svg.index(">alpha</text>"), :<, svg.index("shot-line"), "the tracer must be painted over the icons"
+  end
+
   def test_color_for_assigns_by_index_and_cycles_past_the_palette
     palette = RobotWars::SvgBoard::PALETTE
 

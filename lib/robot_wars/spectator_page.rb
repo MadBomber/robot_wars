@@ -17,8 +17,10 @@ module RobotWars
     # One robot's snapshot; x/y are nil once it has no square.
     Entry = Data.define(:id, :life, :x, :y, :color, :alive)
 
+    # `events` is the turn's typed event stream (TurnResolver's Report#events);
+    # the page mines it for the attacks to animate on the board.
     # :reek:ControlParameter -- `roster || game.robots` is an injectable-collaborator fallback, not behavior selection.
-    def initialize(game:, roster: nil)
+    def initialize(game:, roster: nil, events: [])
       board = game.board
       @width = board.width
       @height = board.height
@@ -30,6 +32,7 @@ module RobotWars
       @owned = game.territory.each_owned.map do |position, robot|
         SvgBoard::OwnedSquare.new(x: position.x, y: position.y, color: color_by_id.fetch(robot.id))
       end
+      @shots = shots_from(events, color_by_id)
     end
 
     def to_html
@@ -74,7 +77,7 @@ module RobotWars
         entry => { id:, life:, x:, y:, color: }
         SvgBoard::Icon.new(id: id, x: x, y: y, color: color, life: life)
       end
-      SvgBoard.new(width: @width, height: @height, icons: icons, owned: @owned).to_s
+      SvgBoard.new(width: @width, height: @height, icons: icons, owned: @owned, shots: @shots).to_s
     end
 
     def legend_html
@@ -91,6 +94,44 @@ module RobotWars
       position = game.occupancy.position_of(robot)
       Entry.new(id: robot.id, life: robot.life, x: position&.x, y: position&.y,
                 color: SvgBoard.color_for(index), alive: !position.nil?)
+    end
+
+    # Each aimed attack (hit, miss, or off the board) becomes a SvgBoard
+    # Shot in the attacker's color: the tracer runs from the square the
+    # attacker declared its action on to the shelled square. Counter-fire
+    # is the same tracer in reverse — defender back to attacker, in the
+    # DEFENDER's color, on a delay so it reads as the response — with
+    # both squares looked up from the declarations (neither an attacker
+    # nor a defender moves). Only the unchallenged-defense premium aims
+    # nowhere and draws nothing.
+    # :reek:UtilityFunction :reek:FeatureEnvy -- pure event-stream-to-drawing translation; private page plumbing.
+    def shots_from(events, color_by_id)
+      hashes = events.map(&:to_h)
+      origins = {}
+      hashes.each do |hash|
+        case hash
+        in { type: :action, robot:, origin: { x:, y: } } then origins[robot] = [x, y]
+        else nil
+        end
+      end
+      hashes.filter_map { |hash| shot_for(hash, origins, color_by_id) }
+    end
+
+    # :reek:UtilityFunction -- see shots_from.
+    def shot_for(hash, origins, color_by_id)
+      case hash
+      in { type: :ranged, kind: :hit | :miss | :off_board => kind, source:, square: { x:, y: } } if origins.key?(source)
+        from_x, from_y = origins.fetch(source)
+        SvgBoard::Shot.new(from_x: from_x, from_y: from_y, to_x: x, to_y: y,
+                           color: color_by_id.fetch(source), hit: kind == :hit)
+      in { type: :ranged, kind: :counter_fire, robot:, source: } if origins.key?(source) && origins.key?(robot)
+        from_x, from_y = origins.fetch(source)
+        to_x, to_y = origins.fetch(robot)
+        SvgBoard::Shot.new(from_x: from_x, from_y: from_y, to_x: to_x, to_y: to_y,
+                           color: color_by_id.fetch(source), hit: true, counter: true)
+      else
+        nil
+      end
     end
 
     # :reek:UtilityFunction :reek:FeatureEnvy -- rendering an Entry means reading its fields; private page plumbing.

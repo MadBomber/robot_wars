@@ -106,6 +106,61 @@ class RobotWars::SpectatorPageTest < Minitest::Test
                          %(fill="#{RobotWars::SvgBoard.color_for(1)}" fill-opacity="0.22"/>)
   end
 
+  def attack(x, y, points: 5)
+    RobotWars::Action.attack(square: RobotWars::Position.new(x: x, y: y), points: points)
+  end
+
+  def test_an_attack_animates_a_shot_from_the_attackers_square_in_its_color
+    game = build_game
+    report = game.play_turn({ game.robot("alpha") => attack(4, 0), game.robot("bravo") => RobotWars::Action.stay })
+
+    svg = RobotWars::SpectatorPage.new(game: game, events: report.events).board_svg
+
+    cell = RobotWars::SvgBoard::CELL
+    margin = RobotWars::SvgBoard::MARGIN
+    pad = RobotWars::SvgBoard::PAD
+    # alpha fired from (1,2) at (4,0) — bravo's square, a HIT. On the
+    # height-4 board, y=2 is one row down from the top; y=0 is the bottom.
+    assert_includes svg, %(<line class="shot-line" x1="#{margin + cell + (cell / 2)}" y1="#{pad + cell + (cell / 2)}" ) +
+                         %(x2="#{margin + (4 * cell) + (cell / 2)}" y2="#{pad + (3 * cell) + (cell / 2)}" ) +
+                         %(pathLength="1" stroke="#{RobotWars::SvgBoard.color_for(0)}")
+    assert_includes svg, "--splash-opacity:.9"
+  end
+
+  def test_a_missed_attack_still_animates_but_splashes_dimly
+    game = build_game
+    report = game.play_turn({ game.robot("alpha") => attack(0, 0), game.robot("bravo") => RobotWars::Action.stay })
+
+    svg = RobotWars::SpectatorPage.new(game: game, events: report.events).board_svg
+
+    assert_includes svg, %(class="shot-line")
+    assert_includes svg, "--splash-opacity:.45"
+  end
+
+  def test_counter_fire_animates_a_delayed_shot_from_defender_back_to_attacker
+    game = build_game
+    report = game.play_turn({ game.robot("alpha") => attack(4, 0),
+                              game.robot("bravo") => RobotWars::Action.defend(points: 3) })
+
+    svg = RobotWars::SpectatorPage.new(game: game, events: report.events).board_svg
+
+    cell = RobotWars::SvgBoard::CELL
+    margin = RobotWars::SvgBoard::MARGIN
+    pad = RobotWars::SvgBoard::PAD
+    # bravo, hit on (4,0), fires back at alpha on (1,2) in its own color.
+    assert_includes svg, %(<g class="shot-counter">)
+    assert_includes svg, %(<line class="shot-line" x1="#{margin + (4 * cell) + (cell / 2)}" y1="#{pad + (3 * cell) + (cell / 2)}" ) +
+                         %(x2="#{margin + cell + (cell / 2)}" y2="#{pad + cell + (cell / 2)}" ) +
+                         %(pathLength="1" stroke="#{RobotWars::SvgBoard.color_for(1)}")
+  end
+
+  def test_a_turn_without_attacks_animates_nothing
+    game = build_game
+    report = stay_all(game)
+
+    refute_includes RobotWars::SpectatorPage.new(game: game, events: report.events).board_svg, "shot-line"
+  end
+
   def test_icons_carry_life_numbers
     svg = RobotWars::SpectatorPage.new(game: build_game).board_svg
 
