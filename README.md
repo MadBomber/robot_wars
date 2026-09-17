@@ -1,5 +1,8 @@
 # RobotWars
 
+> **Note:** This gem is still in development. It is waiting on the
+> release of some of its dependencies before it can be published.
+
 RobotWars is a component of the [RobotLab](https://github.com/MadBomber/robot_lab)
 multi-robot LLM orchestration project: a turn-based game in which RobotLab
 robots compete on a 2D grid board until only one remains.
