@@ -21,9 +21,14 @@
   catch-up call so commentary tracks the live board instead of
   narrating history. A failing announcer is warned about and dropped
   rather than ending the match, and the finale is fully spoken before
-  the process exits. The one exception to the concurrency: turn 1
-  waits (`Booth#drain`) until the announcer has finished its
-  introduction.
+  the process exits. The match loop then became a broadcast
+  pipeline (ruled by Dewayne): turn 1 waits for the introduction,
+  after which turn N+1 is collected and resolved while the booth is
+  calling turn N — and each turn's story starts on every channel at
+  once (terminal, browser SSE update, announcer call), so the board
+  you see matches the turn you hear. Commentary never trails by more
+  than one turn and every turn gets its own call; match pace is
+  whichever is slower each turn, the pilots or the booth.
 - The turn-event stream: `TurnResolver::Report#events` is the ordered,
   typed record of everything a turn did — declared actions, solo
   conflicts, conflicts, displacements, ranged effects, deaths, and

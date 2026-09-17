@@ -222,6 +222,13 @@ booth&.announce(header)
 # concurrently and catches up on its own.
 booth&.drain
 
+# The broadcast pipeline: turn N+1 is collected and resolved WHILE the
+# booth is still calling turn N; then the loop drains the booth and
+# tells turn N+1's story on every channel at once — terminal, browser
+# update, and the announcer's next call all start together, so what
+# you see always matches what you hear. Commentary is never more than
+# one turn behind, every turn gets its own call, and the match runs at
+# the pace of whichever is slower each turn: the pilots or the booth.
 last_report = nil
 until game.over? || game.turn_number >= options[:max_turns]
   # Every pilot's prompt goes out concurrently — the calls are
@@ -253,6 +260,7 @@ until game.over? || game.turn_number >= options[:max_turns]
   # behavior for real errors.
   deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + options[:timeout]
   actions = {}
+  story = []
   threads.each do |robot, thread|
     remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
     if thread.join([remaining, 0].max)
@@ -264,26 +272,31 @@ until game.over? || game.turn_number >= options[:max_turns]
     else
       thread.kill
       game.remove_robot(robot)
-      obituary = "#{robot.id} is brain dead (no reply within #{options[:timeout]}s) — removed from the match"
-      puts obituary
-      spectator_log << obituary
-      broadcast.call
-      booth&.announce(obituary)
+      # Told with this turn's story at the sync point below, not here —
+      # the previous turn's call may still be on the air.
+      story << "#{robot.id} is brain dead (no reply within #{options[:timeout]}s) — removed from the match"
     end
   end
-  next if game.over?
 
-  report = game.play_turn(actions)
-  # The turn's story is the Report's own event stream, narrated by the
-  # one shared TurnNarrator — the browser's play-by-play panel shows
-  # these exact lines, so the two spectators can never disagree.
-  recap = ["turn #{game.turn_number}: #{game.alive_robots.map { |r| "#{r.id}=#{r.life}" }.join(', ')}"]
-  RobotWars::TurnNarrator.new(report: report).lines.each { |line| recap << "  #{line}" }
-  puts recap
-  spectator_log.concat(recap)
+  report = nil
+  unless game.over?
+    report = game.play_turn(actions)
+    # The turn's story is the Report's own event stream, narrated by the
+    # one shared TurnNarrator — the browser's play-by-play panel shows
+    # these exact lines, so the three spectators can never disagree.
+    story << "turn #{game.turn_number}: #{game.alive_robots.map { |r| "#{r.id}=#{r.life}" }.join(', ')}"
+    RobotWars::TurnNarrator.new(report: report).lines.each { |line| story << "  #{line}" }
+  end
+
+  # The pipeline's sync point: wait out the previous turn's call, then
+  # tell this turn's story everywhere at once. The next iteration's
+  # pilots start thinking while the booth speaks.
+  booth&.drain
+  puts story
+  spectator_log.concat(story)
   broadcast.call(report: report)
-  booth&.announce(recap.join("\n"))
-  last_report = report
+  booth&.announce(story.join("\n"))
+  last_report = report if report
 end
 
 finale = if game.tie?
@@ -293,6 +306,9 @@ finale = if game.tie?
          else
            "Stopped after #{game.turn_number} turns (max-turns reached) — #{game.alive_robots.size} warriors still standing."
          end
+# Same sync as every turn: the finale isn't shown until the last
+# turn's call is off the air.
+booth&.drain
 puts "---"
 puts finale
 spectator_log << "---" << finale
