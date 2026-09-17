@@ -2,8 +2,9 @@ module RobotWars
   # The ringside radio voice of a match: an LLM persona that turns each
   # raw log moment — the lineup, a turn's recap, the final result — into
   # on-air play-by-play and speaks it aloud. The persona itself belongs
-  # to the `llm_robot`'s prompt: rwars builds it from the warriors
-  # directory's _announcer.md template, editable like any warrior brain.
+  # to the `llm_robot`'s prompt: rwars builds it from an announcer brain
+  # template (--announcer FILE, defaulting to the gem's shipped
+  # examples/warriors/_announcer.md), editable like any warrior brain.
   # `llm_robot` is anything answering `#run(message)` with a result that
   # answers `#reply` (a RobotLab::Robot in practice, never required by
   # name); `speaker` is anything answering `#call(text)` — SaySpeaker by

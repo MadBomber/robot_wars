@@ -26,11 +26,15 @@
   the booth — `Announcer` (an LLM persona with its own chat history
   for cross-turn continuity) narrates the lineup, every turn's recap,
   brain-dead removals, and the final result; `SaySpeaker` speaks each
-  call aloud through macOS's `say`. The persona is the warriors
-  directory's `_announcer.md` template, editable like any warrior
-  brain; the shipped example's front matter picks
-  `lms/openai/gpt-oss-20b`, and the flag's optional PROVIDER/MODEL
-  overrides it.
+  call aloud through macOS's `say`. The persona is an announcer brain
+  template editable like any warrior's: the gem's shipped
+  `examples/warriors/_announcer.md` by default (front matter picks
+  `lms/openai/gpt-oss-20b` and temperature), or any file via
+  `--announcer FILE` (parsed by the new `PromptTemplate`, since it
+  can live outside the warriors directory).
+- `--warriors` now defaults to the gem's shipped `examples/warriors`
+  (the `examples/` directory ships with the gem), so a bare `rwars`
+  runs the five example brains out of the box.
 
 ## [0.1.1] - 2026-09-17
 

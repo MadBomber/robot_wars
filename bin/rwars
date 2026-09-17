@@ -1,13 +1,15 @@
 #!/usr/bin/env ruby
 # rwars — run a RobotWars match with LLM-backed warriors.
 #
-#   rwars --warriors ./warriors --width 10 --height 10
+#   rwars                                   # the gem's example warriors
+#   rwars --warriors ./warriors --size 10x10
 #
 # Each warrior is one *.md prompt template (RobotLab's format: YAML
-# front matter + a personality body) in the given directory. The
-# filename (minus ".md") becomes that warrior's id. Files starting
-# with "_" are never warriors: they are shared partials or, for
-# _announcer.md, the --announcer booth's brain template.
+# front matter + a personality body) in the warriors directory — the
+# gem's shipped examples/warriors unless --warriors says otherwise.
+# The filename (minus ".md") becomes that warrior's id. Files starting
+# with "_" are never warriors: they are shared partials, or the
+# shipped _announcer.md default brain for --announcer.
 #
 # The rules of the game are NOT the templates' job: every robot gets
 # the gem's own canonical recap (RobotWars::GameRules, shipped as
@@ -32,24 +34,25 @@ $stdout.sync = true
 # every warrior onto the same one. Nothing here names a provider or
 # model of its own — a template that names neither falls through to
 # RobotLab's config cascade.
-options = { width: 10, height: 10, max_turns: 500, seed: nil, model: nil,
-            life: RobotWars::Robot::STARTING_LIFE, timeout: 60.0,
-            announcer: false, announcer_model: nil }
+# The gem's own examples ship with it, so they make a working default
+# for both the warrior roster and the announcer's brain.
+default_warriors  = File.join(repo_root, "examples", "warriors")
+default_announcer = File.join(default_warriors, "_announcer.md")
 
+options = { warriors: default_warriors, width: 10, height: 10, max_turns: 500, seed: nil,
+            model: nil, life: RobotWars::Robot::STARTING_LIFE, timeout: 60.0, announcer: nil }
+
+warriors_help  = "Directory of *.md warrior brain templates (default: the gem's examples/warriors)"
 timeout_help   = "Seconds a pilot may take to answer each turn before it is declared brain dead " \
                  "and its robot removed from the match (default: #{options[:timeout].to_i})"
 announcer_help = "Add a radio play-by-play announcer who speaks each turn aloud through macOS's " \
-                 "`say`. Its brain is the warriors directory's _announcer.md template; " \
-                 "PROVIDER/MODEL overrides that template's own model"
-announcer_arg  = lambda do |model|
-  options[:announcer] = true
-  options[:announcer_model] = model
-end
+                 "`say`. FILE is your own announcer brain template " \
+                 "(default: the gem's examples/warriors/_announcer.md)"
 
 parser = OptionParser.new do |opts|
-  opts.banner = "Usage: rwars --warriors DIR [options]"
+  opts.banner = "Usage: rwars [options]"
 
-  opts.on("-w", "--warriors DIR", "Directory of *.md warrior brain templates (required)") { |dir| options[:warriors] = dir }
+  opts.on("-w", "--warriors DIR", warriors_help) { |dir| options[:warriors] = dir }
   opts.on("--width N", Integer, "Board width (default: #{options[:width]})") { |n| options[:width] = n }
   opts.on("--height N", Integer, "Board height (default: #{options[:height]})") { |n| options[:height] = n }
   opts.on("--size WxH", "Board size shorthand, e.g. 12x12 (overrides --width/--height)") do |size|
@@ -62,7 +65,7 @@ parser = OptionParser.new do |opts|
   opts.on("--life N", Integer, "Starting life for every robot (default: #{options[:life]})") { |n| options[:life] = n }
   opts.on("--model PROVIDER/MODEL", "Force every warrior onto this model, overriding its own front matter") { |m| options[:model] = m }
   opts.on("--timeout SECONDS", Float, timeout_help) { |secs| options[:timeout] = secs }
-  opts.on("--announcer [PROVIDER/MODEL]", announcer_help, &announcer_arg)
+  opts.on("--announcer [FILE]", announcer_help) { |file| options[:announcer] = File.expand_path(file || default_announcer) }
   opts.on("--version", "Show the robot_wars gem version") do
     puts "rwars #{RobotWars::VERSION}"
     exit
@@ -75,11 +78,6 @@ end
 
 parser.parse!(ARGV)
 
-unless options[:warriors]
-  warn parser
-  abort "\nerror: --warriors DIR is required"
-end
-
 abort "error: --life must be positive; got #{options[:life]}" unless options[:life].positive?
 abort "error: --timeout must be positive; got #{options[:timeout]}" unless options[:timeout].positive?
 
@@ -90,11 +88,8 @@ brain_files = Dir.glob(File.join(warriors_dir, "*.md")).reject { |path| File.bas
 abort "error: no *.md files found in #{warriors_dir}" if brain_files.empty?
 abort "error: need at least 2 warriors to fight; found #{brain_files.size}" if brain_files.size < 2
 
-# The announcer's brain lives with the warriors' but is not one of
-# them — the underscore keeps it out of the roster above.
-announcer_template = File.join(warriors_dir, "_announcer.md")
-if options[:announcer] && !File.file?(announcer_template)
-  abort "error: --announcer needs #{announcer_template} (the announcer's brain template)"
+if options[:announcer] && !File.file?(options[:announcer])
+  abort "error: announcer brain template #{options[:announcer]} does not exist"
 end
 
 # Setting PM.configure directly here would be overwritten the moment
@@ -120,14 +115,13 @@ override = RobotWars::ModelSpec.parse(options[:model])
 specs = game.robots.to_h do |robot|
   [robot, override || RobotWars::ModelSpec.from_template(File.join(warriors_dir, "#{robot.id}.md"))]
 end
-# The announcer's model resolves the same way: --announcer's optional
-# PROVIDER/MODEL beats _announcer.md's front matter, and a template
-# that names no model falls through to RobotLab's config cascade.
-announcer_spec = nil
-if options[:announcer]
-  announcer_spec = RobotWars::ModelSpec.parse(options[:announcer_model]) ||
-                   RobotWars::ModelSpec.from_template(announcer_template)
-end
+# The announcer's brain file can live anywhere, so it can't go through
+# prompt_manager's single template directory (pinned to the warriors
+# above) — parse it directly: front matter picks model and temperature
+# (naming no model falls through to RobotLab's config cascade), and the
+# body is the persona.
+announcer_brain = options[:announcer] && RobotWars::PromptTemplate.load(options[:announcer])
+announcer_spec  = announcer_brain && announcer_brain.model_spec
 
 # Providers that live outside ruby_llm itself (apfel, lms, ...) ship as
 # ruby_llm-providers-<name> gems and register themselves when required;
@@ -159,14 +153,14 @@ warriors = game.robots.to_h do |robot|
 end
 
 # The announcer is not a combatant: no sensing reports, never in the
-# roster — its persona is the _announcer.md template (editable like any
-# warrior brain) and its message is each turn's printed recap. Its
-# RobotLab chat keeps history, so the commentary can carry rivalries
-# and momentum across turns. Each call blocks until `say` finishes:
-# the match runs at broadcast pace.
+# roster — its persona is its brain template's body and its message is
+# each turn's printed recap. Its RobotLab chat keeps history, so the
+# commentary can carry rivalries and momentum across turns. Each call
+# blocks until `say` finishes: the match runs at broadcast pace.
 announcer = nil
-if options[:announcer]
-  booth_options = { name: "announcer", template: :_announcer }
+if announcer_brain
+  booth_options = { name: "announcer", system_prompt: announcer_brain.body }
+  booth_options[:temperature] = announcer_brain.temperature if announcer_brain.temperature
   if announcer_spec
     booth_options[:model]    = announcer_spec.model
     booth_options[:provider] = announcer_spec.provider if announcer_spec.provider

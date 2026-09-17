@@ -48,7 +48,8 @@ printed turn by turn) — `bundle exec ruby examples/01_random_match.rb`.
 built from a human-authored prompt file (RobotLab's `.md` template
 format: YAML front matter + a personality body). One file per warrior;
 the filename (minus `.md`) becomes that warrior's id (files starting
-with `_` are reserved for shared partials and skipped). A warrior file
+with `_` are never warriors: shared partials, or the shipped
+`_announcer.md` announcer brain). A warrior file
 carries only its model choice and personality — the rules of the game
 are the gem's job: `RobotWars::GameRules` (shipped as
 `lib/robot_wars/game_rules.md`) is handed to every robot as its system
@@ -72,8 +73,12 @@ No API key, no cloud calls, no per-token cost:
 brew install apfel   # once, per machine
 apfel --serve        # start the local server (127.0.0.1:11434)
 
-bin/rwars --warriors examples/warriors --width 10 --height 10
+bin/rwars            # examples/warriors is the default roster
 ```
+
+The gem ships its `examples/` directory, so `--warriors` defaults to
+the installed gem's `examples/warriors`; point it at your own
+directory to field your own roster.
 
 Apfel requires an Apple Silicon Mac on macOS 26+ with Apple
 Intelligence enabled. See the
@@ -103,11 +108,11 @@ stalemates.
 Pass `--announcer` to put a radio play-by-play announcer in the booth:
 an LLM persona that narrates the lineup, every turn's recap, and the
 final result — and speaks each call aloud through macOS's `say`. Its
-brain is the warriors directory's `_announcer.md`, a template editable
-exactly like a warrior's (the underscore keeps it out of the roster);
-the shipped example picks `lms/openai/gpt-oss-20b` in its front
-matter, and `--announcer PROVIDER/MODEL` overrides that. The match
-runs at broadcast pace: each turn waits for the commentary to finish.
+brain is a template editable exactly like a warrior's: the gem's
+shipped `examples/warriors/_announcer.md` by default (front matter
+picks `lms/openai/gpt-oss-20b`), or your own file anywhere via
+`--announcer path/to/my_announcer.md`. The match runs at broadcast
+pace: each turn waits for the commentary to finish.
 
 `examples/warriors/` has five ready-made brains with distinct
 personalities — a fight between them exercises very different play
@@ -122,7 +127,7 @@ styles:
 | `wanderer.md` | Pure expansionist; claims empty ground, avoids conflict entirely |
 
 ```bash
-bin/rwars --warriors examples/warriors --width 10 --height 10
+bin/rwars --size 10x10 --announcer   # default roster, spoken play-by-play
 ```
 
 ## Installation
