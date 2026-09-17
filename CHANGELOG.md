@@ -21,7 +21,9 @@
   catch-up call so commentary tracks the live board instead of
   narrating history. A failing announcer is warned about and dropped
   rather than ending the match, and the finale is fully spoken before
-  the process exits.
+  the process exits. The one exception to the concurrency: turn 1
+  waits (`Booth#drain`) until the announcer has finished its
+  introduction.
 - The turn-event stream: `TurnResolver::Report#events` is the ordered,
   typed record of everything a turn did — declared actions, solo
   conflicts, conflicts, displacements, ranged effects, deaths, and

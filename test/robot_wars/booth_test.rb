@@ -66,6 +66,48 @@ class RobotWars::BoothTest < Minitest::Test
     assert_equal ["finale"], announcer.calls
   end
 
+  def test_drain_blocks_until_everything_queued_so_far_is_spoken
+    announcer = GatedAnnouncer.new
+    booth = RobotWars::Booth.new(announcer: announcer)
+    booth.announce("welcome to the arena")
+
+    drainer = Thread.new { booth.drain }
+    announcer.wait_until_speaking
+    sleep 0.05
+    assert_predicate drainer, :alive?, "drain must wait while the intro is still being spoken"
+
+    announcer.finish_speaking
+    Timeout.timeout(5) { drainer.join }
+
+    assert_equal ["welcome to the arena"], announcer.calls
+    booth.close
+  end
+
+  def test_drain_with_nothing_queued_returns_immediately_and_leaves_the_booth_open
+    announcer = GatedAnnouncer.new
+    booth = RobotWars::Booth.new(announcer: announcer)
+
+    Timeout.timeout(5) { booth.drain }
+
+    booth.announce("still on the air")
+    announcer.wait_until_speaking
+    announcer.finish_speaking
+    booth.close
+    assert_equal ["still on the air"], announcer.calls
+  end
+
+  def test_drain_counts_a_failed_announcement_as_delivered
+    flaky = Object.new
+    flaky.define_singleton_method(:announce) { |_text| raise "dead mic" }
+    booth = RobotWars::Booth.new(announcer: flaky)
+
+    assert_output("", /announcer failed/) do
+      booth.announce("doomed")
+      Timeout.timeout(5) { booth.drain }
+      booth.close
+    end
+  end
+
   def test_close_with_nothing_queued_returns_and_is_idempotent
     booth = RobotWars::Booth.new(announcer: GatedAnnouncer.new)
 

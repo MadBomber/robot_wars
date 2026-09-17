@@ -17,8 +17,11 @@ module RobotWars
       @announcer = announcer
       @pending = []
       @closed = false
+      @enqueued = 0
+      @delivered = 0
       @mutex = Mutex.new
       @ready = ConditionVariable.new
+      @idle = ConditionVariable.new
       @worker = Thread.new { work }
     end
 
@@ -28,7 +31,19 @@ module RobotWars
         raise Error, "the booth is closed" if @closed
 
         @pending << text
+        @enqueued += 1
         @ready.signal
+      end
+      self
+    end
+
+    # Blocks until everything announced SO FAR has been fully delivered
+    # (LLM call and speech included) — how the match holds the opening
+    # whistle until the booth finishes its introduction. The booth
+    # stays open; a failed announcement counts as delivered.
+    def drain
+      @mutex.synchronize do
+        @idle.wait(@mutex) while @delivered < @enqueued
       end
       self
     end
@@ -49,6 +64,10 @@ module RobotWars
     def work
       while (batch = next_batch)
         deliver(batch)
+        @mutex.synchronize do
+          @delivered += batch.size
+          @idle.broadcast
+        end
       end
     end
 

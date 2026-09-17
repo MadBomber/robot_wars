@@ -116,7 +116,9 @@ picks `lms/openai/gpt-oss-20b`), or your own file anywhere via
 `--announcer path/to/my_announcer.md`. The booth runs on its own
 thread, so the match plays at pilot speed while the commentary
 happens concurrently — and when the action outruns the announcer,
-the booth catches up by calling the missed turns in one breath.
+the booth catches up by calling the missed turns in one breath. Only
+the introduction holds the game: turn 1 waits until the opening call
+has been fully spoken.
 
 Pass `--browser` to watch the match live in a web browser: a
 spectator page served from a background thread (no extra

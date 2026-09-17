@@ -217,6 +217,10 @@ puts header
 spectator_log.concat(header.lines.map(&:chomp))
 broadcast.call
 booth&.announce(header)
+# Hold the opening whistle: turn 1 doesn't start until the booth has
+# finished its introduction. After that the commentary runs
+# concurrently and catches up on its own.
+booth&.drain
 
 last_report = nil
 until game.over? || game.turn_number >= options[:max_turns]
