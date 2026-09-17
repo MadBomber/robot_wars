@@ -35,6 +35,78 @@ end
 game.winner # => the last robot standing, or nil for a tie
 ```
 
+See `examples/01_random_match.rb` for a runnable match (random actions,
+printed turn by turn) — `bundle exec ruby examples/01_random_match.rb`.
+
+## The `rwars` CLI — LLM-backed warriors
+
+`rwars` runs a real match with each warrior's actions decided by an LLM,
+built from a human-authored prompt file (RobotLab's `.md` template
+format: YAML front matter + a personality body). One file per warrior;
+the filename (minus `.md`) becomes that warrior's id (files starting
+with `_` are reserved for shared partials and skipped). A warrior file
+carries only its model choice and personality — the rules of the game
+are the gem's job: `RobotWars::GameRules` (shipped as
+`lib/robot_wars/game_rules.md`) is handed to every robot as its system
+prompt, so all warriors everywhere play by the same canonical rules.
+
+Each warrior's `.md` front matter picks its own brain via the `model:`
+field, written as `<provider>/<model id>` — the RubyLLM provider name,
+a slash, then the model id as that provider knows it (e.g.
+`apfel/apple-foundationmodel`, `ollama/llama3`). Pass
+`--model PROVIDER/MODEL` to force every warrior onto the same one
+regardless of what its template says. Nothing is hardcoded: providers
+that ship outside ruby_llm (as `ruby_llm-providers-<name>` gems) are
+required on demand, and a template that names no model falls through to
+RobotLab's config cascade.
+
+The example warriors in `examples/warriors/` all pick **Apfel** —
+Apple's on-device Foundation Model, served locally by the `apfel` CLI.
+No API key, no cloud calls, no per-token cost:
+
+```bash
+brew install apfel   # once, per machine
+apfel --serve        # start the local server (127.0.0.1:11434)
+
+bin/rwars --warriors examples/warriors --width 10 --height 10
+```
+
+Apfel requires an Apple Silicon Mac on macOS 26+ with Apple
+Intelligence enabled. See the
+[`ruby_llm-providers-apfel`](https://apfel.franzai.com/) gem for
+details.
+
+Each turn, a warrior is sent a sensing report (RULES.md 33-35: its own
+position and life, and the full map of owned squares — never another
+robot's position) and must reply with exactly one line:
+
+```
+STAY
+MOVE <north|northeast|east|southeast|south|southwest|west|northwest>
+ATTACK <x>,<y> <points>
+DEFEND <points>
+```
+
+A reply that doesn't parse is treated as an illegal-move-style penalty
+(RULES.md 21) rather than crashing the match. Run `bin/rwars --help` for
+all options, including `--seed` for a reproducible match and
+`--max-turns` as a safety valve against stalemates.
+
+`examples/warriors/` has four ready-made brains with distinct
+personalities — a fight between them exercises very different play
+styles:
+
+| Warrior | Strategy |
+|---|---|
+| `warmonger.md` | Relentlessly aggressive; attacks almost every turn |
+| `sentinel.md` | Patient turtle; claims territory by occupation, rarely fights |
+| `opportunist.md` | Reactive and adaptive; picks its spots, varies its play |
+| `wanderer.md` | Pure expansionist; claims empty ground, avoids conflict entirely |
+
+```bash
+bin/rwars --warriors examples/warriors --width 10 --height 10
+```
+
 ## Installation
 
 Add the gem to your application's Gemfile:

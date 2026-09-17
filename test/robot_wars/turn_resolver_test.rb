@@ -25,6 +25,16 @@ class RobotWars::TurnResolverTest < Minitest::Test
     assert_equal pos(1, 1), @occupancy.position_of(robot)
   end
 
+  def test_an_invalid_action_is_penalized_like_an_illegal_move
+    robot = place("r1", life: 100, at: [1, 1])
+    resolver = turn_resolver(illegal_move_resolver: illegal_move_resolver(rolls: [6]))
+
+    resolver.resolve!(robot => RobotWars::Action.invalid)
+
+    assert_equal 94, robot.life
+    assert_equal pos(1, 1), @occupancy.position_of(robot)
+  end
+
   def test_a_move_off_the_board_is_illegal_and_costs_the_solo_conflict_roll
     robot = place("r1", life: 100, at: [0, 0])
     resolver = turn_resolver(illegal_move_resolver: illegal_move_resolver(rolls: [7]))
@@ -47,6 +57,46 @@ class RobotWars::TurnResolverTest < Minitest::Test
     assert_equal pos(0, 0), @occupancy.position_of(robot)
   end
 
+  def test_an_invalid_action_is_reported_as_a_solo_conflict
+    robot = place("r1", life: 100, at: [1, 1])
+    resolver = turn_resolver(illegal_move_resolver: illegal_move_resolver(rolls: [6]))
+
+    report = resolver.resolve!(robot => RobotWars::Action.invalid)
+
+    assert_equal [RobotWars::TurnResolver::SoloConflict.new(robot: robot, roll: 6)], report.solo_conflicts
+    assert_equal "solo conflict: r1 — roll 6, no movement", report.solo_conflicts.first.to_s
+  end
+
+  def test_an_illegal_move_is_reported_as_a_solo_conflict
+    robot = place("r1", life: 100, at: [0, 0])
+    resolver = turn_resolver(illegal_move_resolver: illegal_move_resolver(rolls: [7]))
+
+    report = resolver.resolve!(robot => RobotWars::Action.move(RobotWars::Direction::WEST))
+
+    assert_equal [RobotWars::TurnResolver::SoloConflict.new(robot: robot, roll: 7)], report.solo_conflicts
+  end
+
+  def test_staying_3_turns_reports_the_occupation_claim_on_the_third
+    robot = place("r1", life: 100, at: [1, 1])
+    resolver = turn_resolver
+
+    2.times { assert_empty resolver.resolve!(robot => RobotWars::Action.stay).claimed_squares_for(robot) }
+    report = resolver.resolve!(robot => RobotWars::Action.stay)
+
+    assert_equal [pos(1, 1)], report.claimed_squares_for(robot)
+    # The 4th turn is continued ownership, not a new claim.
+    assert_empty resolver.resolve!(robot => RobotWars::Action.stay).claimed_squares_for(robot)
+  end
+
+  def test_a_legal_turn_reports_no_conflicts
+    robot = place("r1", life: 100, at: [1, 1])
+
+    report = resolve(robot => RobotWars::Action.stay)
+
+    assert_empty report.conflicts
+    assert_empty report.solo_conflicts
+  end
+
   def test_swapping_squares_is_not_a_conflict
     first = place("r1", life: 100, at: [0, 1])
     second = place("r2", life: 100, at: [1, 1])
@@ -67,10 +117,23 @@ class RobotWars::TurnResolverTest < Minitest::Test
     weak = place("weak", life: 90, at: [2, 1])
 
     resolver = turn_resolver(conflict_resolver: conflict_resolver(rolls: [5]))
-    resolver.resolve!(
+    report = resolver.resolve!(
       strong => RobotWars::Action.move(RobotWars::Direction::EAST),
       weak => RobotWars::Action.move(RobotWars::Direction::WEST)
     )
+
+    conflict = report.conflicts.first
+    assert_equal 1, report.conflicts.size
+    assert_equal pos(1, 1), conflict.square
+    assert_equal [strong, weak], conflict.robots
+    assert_equal 5, conflict.roll
+    assert_equal strong, conflict.winner
+    assert_equal [weak], conflict.losers
+    assert_equal "conflict at (1,1): strong vs weak — roll 5, strong takes the square", conflict.to_s
+
+    # Conquest is a new ownership, reported as a claim.
+    assert_equal [pos(1, 1)], report.claimed_squares_for(strong)
+    assert_empty report.claimed_squares_for(weak)
 
     assert_equal pos(1, 1), @occupancy.position_of(strong)
     assert_equal 94, strong.life
@@ -86,10 +149,15 @@ class RobotWars::TurnResolverTest < Minitest::Test
     second = place("b", life: 100, at: [2, 1])
 
     resolver = turn_resolver(conflict_resolver: conflict_resolver(rolls: [3]))
-    resolver.resolve!(
+    report = resolver.resolve!(
       first => RobotWars::Action.move(RobotWars::Direction::EAST),
       second => RobotWars::Action.move(RobotWars::Direction::WEST)
     )
+
+    conflict = report.conflicts.first
+    assert_nil conflict.winner
+    assert_equal [first, second], conflict.losers
+    assert_equal "conflict at (1,1): a vs b — roll 3, tie, everyone loses", conflict.to_s
 
     assert_equal pos(0, 1), @occupancy.position_of(first)
     assert_equal pos(2, 1), @occupancy.position_of(second)
@@ -129,6 +197,9 @@ class RobotWars::TurnResolverTest < Minitest::Test
     assert_equal 91, a.life
     assert_predicate a, :alive?
     assert_empty report.deaths
+    # Both battles are reported: the (1,0) contest and A's losing
+    # return-home fight against B at (0,0).
+    assert_equal [pos(1, 0), pos(0, 0)], report.conflicts.map(&:square)
   end
 
   # Same shape, but every neighbor of the final battle square is taken —
@@ -158,13 +229,32 @@ class RobotWars::TurnResolverTest < Minitest::Test
     attacker = place("attacker", life: 100, at: [0, 0])
     target = place("target", life: 100, at: [2, 2])
 
-    resolve(
+    report = resolve(
       attacker => RobotWars::Action.attack(square: pos(2, 2), points: 5),
       target => RobotWars::Action.defend(points: 10)
     )
 
     assert_equal 95, target.life
     assert_equal 90, attacker.life
+
+    # Battleship feedback: the attacker learns HIT; the defender's
+    # counter-fire is not a shot of its own, so it learns nothing.
+    assert_equal :hit, report.attack_outcome_for(attacker)
+    assert_nil report.attack_outcome_for(target)
+  end
+
+  def test_an_attack_on_an_empty_square_is_a_miss
+    attacker = place("attacker", life: 100, at: [0, 0])
+    bystander = place("bystander", life: 100, at: [1, 1])
+
+    report = resolve(
+      attacker => RobotWars::Action.attack(square: pos(2, 2), points: 5),
+      bystander => RobotWars::Action.stay
+    )
+
+    assert_equal 100, attacker.life
+    assert_equal :miss, report.attack_outcome_for(attacker)
+    assert_nil report.attack_outcome_for(bystander)
   end
 
   def test_a_robot_killed_by_ranged_combat_is_removed_and_its_territory_released

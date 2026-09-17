@@ -1,0 +1,6 @@
+module RobotWars
+  VERSION: String
+
+  class Error < StandardError
+  end
+end

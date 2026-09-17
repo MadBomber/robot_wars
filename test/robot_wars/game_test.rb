@@ -10,6 +10,18 @@ class RobotWars::GameTest < Minitest::Test
     assert_equal %w[r1 r2 r3], game.robots.map(&:id)
   end
 
+  def test_start_gives_every_robot_the_standard_100_life_by_default
+    game = RobotWars::Game.start(board: RobotWars::Board.new(width: 3, height: 3), robot_ids: %w[r1 r2])
+
+    assert_equal [100, 100], game.robots.map(&:life)
+  end
+
+  def test_start_accepts_a_custom_starting_life_for_every_robot
+    game = RobotWars::Game.start(board: RobotWars::Board.new(width: 3, height: 3), robot_ids: %w[r1 r2], life: 25)
+
+    assert_equal [25, 25], game.robots.map(&:life)
+  end
+
   def test_robot_looks_up_a_roster_member_by_id
     game = RobotWars::Game.start(board: RobotWars::Board.new(width: 3, height: 3), robot_ids: %w[r1 r2])
 

@@ -13,7 +13,42 @@ module RobotWars
   # defeat count (not a per-event count) is what caps a chain at two
   # losses, so displacing a robot only starts THAT robot's own count.
   class TurnResolver
-    Report = Data.define(:deaths, :ranged_effects)
+    Report = Data.define(:deaths, :ranged_effects, :conflicts, :solo_conflicts, :claims) do
+      # Battleship-style feedback for an attacker: :hit when this
+      # robot's attack this turn found a robot on the target square,
+      # :miss when it found the square empty, nil when it didn't attack.
+      # Counter-fire and unchallenged-defense effects don't count — they
+      # aren't the robot's own shot.
+      def attack_outcome_for(robot)
+        ranged_effects.find { |effect| effect.source == robot && %i[hit miss].include?(effect.kind) }&.kind
+      end
+
+      # The squares this robot NEWLY came to own this turn — by conquest
+      # or by completing a 3-turn occupation streak. Squares it already
+      # owned are never repeated.
+      def claimed_squares_for(robot)
+        claims.select { |claim| claim.robot == robot }.map(&:square)
+      end
+    end
+
+    # One square becoming newly owned during the turn (rules 22-23).
+    Claim = Data.define(:robot, :square)
+
+    # One resolved square conflict (rules 13-16), kept on the Report so a
+    # match transcript can say what happened, not just the resulting life
+    # totals. `winner` is nil on a tie.
+    Conflict = Data.define(:square, :robots, :roll, :winner, :losers) do
+      def to_s
+        outcome = winner ? "#{winner.id} takes the square" : "tie, everyone loses"
+        "conflict at (#{square.x},#{square.y}): #{robots.map(&:id).join(' vs ')} — roll #{roll}, #{outcome}"
+      end
+    end
+
+    # One rule 21 solo conflict — an invalid action or illegal move
+    # punished with a random hit and no movement.
+    SoloConflict = Data.define(:robot, :roll) do
+      def to_s = "solo conflict: #{robot.id} — roll #{roll}, no movement"
+    end
 
     def initialize(board:, occupancy:, territory:, roll_generator: RollGenerator.new, random: Random.new,
                    move_resolver: nil, conflict_resolver: nil, illegal_move_resolver: nil)
@@ -29,6 +64,9 @@ module RobotWars
     # actions: Hash{Robot => Action}, exactly one entry per living robot
     # on the board (rule 8).
     def resolve!(actions)
+      @conflicts = []
+      @solo_conflicts = []
+      @claims = []
       origins = actions.keys.to_h { |robot| [robot, @occupancy.position_of(robot)] }
 
       destinations = apply_movement_economy(actions)
@@ -38,9 +76,10 @@ module RobotWars
       ranged_effects = resolve_ranged_combat(actions)
       deaths = process_deaths(eliminated)
 
-      @territory.tick!(@occupancy)
+      @territory.tick!(@occupancy).each { |square, robot| @claims << Claim.new(robot: robot, square: square) }
 
-      Report.new(deaths: deaths, ranged_effects: ranged_effects)
+      Report.new(deaths: deaths, ranged_effects: ranged_effects,
+                 conflicts: @conflicts, solo_conflicts: @solo_conflicts, claims: @claims)
     end
 
     private
@@ -55,19 +94,29 @@ module RobotWars
       origin = @occupancy.position_of(robot)
       return resolve_move(robot, origin, action.direction) if action.move?
 
-      robot.heal(1) if action.stay?
+      if action.invalid?
+        punish_solo_conflict(robot)
+      elsif action.stay?
+        robot.heal(1)
+      end
+
       origin
     end
 
     def resolve_move(robot, origin, direction)
       result = @move_resolver.resolve(robot, origin, direction)
       unless result.legal
-        @illegal_move_resolver.resolve(robot)
+        punish_solo_conflict(robot)
         return origin
       end
 
       robot.apply_damage(1)
       result.destination
+    end
+
+    def punish_solo_conflict(robot)
+      result = @illegal_move_resolver.resolve(robot)
+      @solo_conflicts << SoloConflict.new(robot: robot, roll: result.roll)
     end
 
     # --- Square conflicts, cascading returns, displacement (13-20) ----
@@ -104,10 +153,12 @@ module RobotWars
       end
 
       result = @conflict_resolver.resolve(contenders)
+      @conflicts << Conflict.new(square: square, robots: contenders, roll: result.roll,
+                                 winner: result.winner, losers: result.losers)
 
       if result.winner
         settled[square] = result.winner
-        @territory.claim!(square, result.winner)
+        record_conquest(square, result.winner)
       else
         settled.delete(square)
       end
@@ -116,6 +167,14 @@ module RobotWars
         defeats[loser] += 1
         queue << { robot: loser, lost_at: square }
       end
+    end
+
+    # A conquest is always NEW ownership — no robot can legally enter a
+    # square someone else owns (and displacement avoids them too), so a
+    # conflict never happens on a square its winner already holds.
+    def record_conquest(square, winner)
+      @territory.claim!(square, winner)
+      @claims << Claim.new(robot: winner, square: square)
     end
 
     def return_home(robot, lost_at, origins, settled, defeats, eliminated, queue)

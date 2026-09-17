@@ -1,0 +1,185 @@
+#!/usr/bin/env ruby
+# rwars — run a RobotWars match with LLM-backed warriors.
+#
+#   rwars --warriors ./warriors --width 10 --height 10
+#
+# Each warrior is one *.md prompt template (RobotLab's format: YAML
+# front matter + a personality body) in the given directory. The
+# filename (minus ".md") becomes that warrior's id. Files starting
+# with "_" are reserved for shared partials, not warriors.
+#
+# The rules of the game are NOT the templates' job: every robot gets
+# the gem's own canonical recap (RobotWars::GameRules, shipped as
+# lib/robot_wars/game_rules.md) as its RobotLab system_prompt.
+
+repo_root = File.expand_path("..", __dir__)
+ENV["BUNDLE_GEMFILE"] = File.expand_path(ENV["BUNDLE_GEMFILE"] || "Gemfile.local", repo_root)
+require "bundler/setup"
+
+require "optparse"
+require "robot_wars"
+
+# Each warrior's own *.md front matter picks its brain: the `model:`
+# field is "<provider>/<model id>" (e.g. apfel/apple-foundationmodel),
+# parsed by RobotWars::ModelSpec. --model, in the same format, forces
+# every warrior onto the same one. Nothing here names a provider or
+# model of its own — a template that names neither falls through to
+# RobotLab's config cascade.
+options = { width: 10, height: 10, max_turns: 500, seed: nil, model: nil,
+            life: RobotWars::Robot::STARTING_LIFE }
+
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: rwars --warriors DIR [options]"
+
+  opts.on("-w", "--warriors DIR", "Directory of *.md warrior brain templates (required)") do |dir|
+    options[:warriors] = dir
+  end
+  opts.on("--width N", Integer, "Board width (default: #{options[:width]})") { |n| options[:width] = n }
+  opts.on("--height N", Integer, "Board height (default: #{options[:height]})") { |n| options[:height] = n }
+  opts.on("--size WxH", "Board size shorthand, e.g. 12x12 (overrides --width/--height)") do |size|
+    options[:width], options[:height] = size.split(/x/i, 2).map(&:to_i)
+  end
+  opts.on("--max-turns N", Integer, "Stop after N turns if nobody has won yet (default: #{options[:max_turns]})") do |n|
+    options[:max_turns] = n
+  end
+  opts.on("--seed N", Integer, "Seed the random number generator for a reproducible match") { |n| options[:seed] = n }
+  opts.on("--life N", Integer, "Starting life for every robot (default: #{options[:life]})") { |n| options[:life] = n }
+  opts.on("--model PROVIDER/MODEL", "Force every warrior onto this model, overriding its own front matter") do |m|
+    options[:model] = m
+  end
+  opts.on("--version", "Show the robot_wars gem version") do
+    puts "rwars #{RobotWars::VERSION}"
+    exit
+  end
+  opts.on("-h", "--help", "Show this help") do
+    puts opts
+    exit
+  end
+end
+
+parser.parse!(ARGV)
+
+unless options[:warriors]
+  warn parser
+  abort "\nerror: --warriors DIR is required"
+end
+
+abort "error: --life must be positive; got #{options[:life]}" unless options[:life].positive?
+
+warriors_dir = File.expand_path(options[:warriors])
+abort "error: #{warriors_dir} is not a directory" unless File.directory?(warriors_dir)
+
+brain_files = Dir.glob(File.join(warriors_dir, "*.md")).reject { |path| File.basename(path).start_with?("_") }
+abort "error: no *.md files found in #{warriors_dir}" if brain_files.empty?
+abort "error: need at least 2 warriors to fight; found #{brain_files.size}" if brain_files.size < 2
+
+# Setting PM.configure directly here would be overwritten the moment
+# RobotLab.config is first touched (lazily, inside RobotLab::Robot#new) —
+# it reapplies its own default prompts_dir. Going through RobotLab's own
+# config makes our setting durable against that lazy reload. Quieting
+# ruby_llm's default :debug logging the same way, since a game shouldn't
+# dump every raw API request/response to stdout by default.
+RobotLab.config.template_path = warriors_dir
+RobotLab.config.ruby_llm.log_level = :warn
+RobotLab.config.after_load
+
+random       = options[:seed] ? Random.new(options[:seed]) : Random.new
+board        = RobotWars::Board.new(width: options[:width], height: options[:height])
+warrior_ids  = brain_files.map { |path| File.basename(path, ".md") }
+game         = RobotWars::Game.start(board: board, robot_ids: warrior_ids, life: options[:life], random: random)
+
+# Resolve each warrior's "<provider>/<model id>" up front: --model wins
+# over front matter, front matter over nothing. RobotLab would otherwise
+# hand the front matter's combined string to RubyLLM verbatim as a model
+# id, so the split into provider + bare model must happen here.
+override = RobotWars::ModelSpec.parse(options[:model])
+specs = game.robots.to_h do |robot|
+  [robot, override || RobotWars::ModelSpec.from_template(File.join(warriors_dir, "#{robot.id}.md"))]
+end
+
+# Providers that live outside ruby_llm itself (apfel, lms, ...) ship as
+# ruby_llm-providers-<name> gems and register themselves when required;
+# built-in providers are already in the registry and need nothing.
+specs.values.compact.map(&:provider).compact.uniq.each do |provider|
+  next if RubyLLM::Provider.providers.key?(provider)
+
+  begin
+    require "ruby_llm/providers/#{provider}"
+  rescue LoadError
+    abort "error: unknown provider #{provider.inspect} — not built into ruby_llm " \
+          "and no ruby_llm/providers/#{provider} library could be loaded"
+  end
+end
+
+warriors = game.robots.to_h do |robot|
+  # Constructor kwargs beat front matter, which is what makes the parsed
+  # bare model id (and --model's universal override) win over the raw
+  # "<provider>/<model>" string still sitting in the template.
+  build_options = { name: robot.id, template: robot.id.to_sym,
+                    system_prompt: RobotWars::GameRules.text }
+  if (spec = specs.fetch(robot))
+    build_options[:model]    = spec.model
+    build_options[:provider] = spec.provider if spec.provider
+  end
+
+  llm_robot = RobotLab.build(**build_options)
+  [robot, RobotWars::Warrior.new(robot: robot, pilot: RobotWars::LLMPilot.new(llm_robot: llm_robot))]
+end
+
+puts <<~HEADER
+  RobotWars — #{warrior_ids.size} warriors on a #{board.width}x#{board.height} board
+  warriors: #{warrior_ids.join(', ')}
+HEADER
+
+last_report = nil
+until game.over? || game.turn_number >= options[:max_turns]
+  actions = game.alive_robots.to_h do |robot|
+    # Battleship-style: an attacker is told on its NEXT turn whether
+    # last turn's shot found a robot (HIT) or an empty square (MISS).
+    sensing = RobotWars::SensingReport.new(
+      game: game, robot: robot,
+      attack_outcome: last_report&.attack_outcome_for(robot)
+    ).to_s
+
+    begin
+      [robot, warriors.fetch(robot).decide(sensing)]
+    rescue StandardError => e
+      abort "error: #{robot.id}'s brain failed to respond (#{e.class}: #{e.message})"
+    end
+  end
+
+  # Origins must be read before resolution — afterward a robot may have
+  # moved, been displaced, or died off the board.
+  origins = actions.keys.to_h { |robot| [robot, game.occupancy.position_of(robot)] }
+
+  report = game.play_turn(actions)
+  puts "turn #{game.turn_number}: #{game.alive_robots.map { |r| "#{r.id}=#{r.life}" }.join(', ')}"
+  # Recap what each warrior declared this turn — every robot that was
+  # alive when actions were collected, including any the turn just
+  # eliminated — then the conflicts those declarations caused, in the
+  # order they resolve: rule 21 solo conflicts during the movement
+  # phase, then the square conflicts.
+  actions.each do |robot, action|
+    line = "  #{robot.id}: #{action.describe(origins.fetch(robot))}"
+    owned = report.claimed_squares_for(robot).map { |square| "(#{square.x},#{square.y})" }
+    line << " — now owns #{owned.join(', ')}" unless owned.empty?
+    puts line
+  end
+  (report.solo_conflicts + report.conflicts).each { |conflict| puts "  #{conflict}" }
+  # Ranged shots resolve last; show each attacker's Battleship-style
+  # outcome (the same feedback its next sensing report will carry).
+  actions.each_key do |robot|
+    outcome = report.attack_outcome_for(robot)
+    puts "  #{robot.id}'s attack was a #{outcome.to_s.upcase}" if outcome
+  end
+  last_report = report
+end
+
+puts "---"
+if game.tie?
+  puts "Tie — the last warriors fell in the same turn."
+elsif game.over?
+  puts "Winner: #{game.winner.id} (#{game.winner.life} life) after #{game.turn_number} turns."
+else
+  puts "Stopped after #{game.turn_number} turns (max-turns reached) — #{game.alive_robots.size} warriors still standing."
+end

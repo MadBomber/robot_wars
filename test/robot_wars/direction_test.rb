@@ -22,4 +22,14 @@ class RobotWars::DirectionTest < Minitest::Test
   def test_north_moves_up
     assert_equal RobotWars::Position.new(x: 0, y: -1), RobotWars::Direction::NORTH
   end
+
+  def test_name_of_names_every_offset
+    names = RobotWars::Direction::OFFSETS.map { |offset| RobotWars::Direction.name_of(offset) }
+
+    assert_equal %w[north northeast east southeast south southwest west northwest], names
+  end
+
+  def test_name_of_returns_nil_for_a_position_that_is_not_a_direction
+    assert_nil RobotWars::Direction.name_of(RobotWars::Position.new(x: 2, y: 5))
+  end
 end

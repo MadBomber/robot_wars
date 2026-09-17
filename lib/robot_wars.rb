@@ -16,6 +16,12 @@ require_relative "robot_wars/illegal_move_resolver"
 require_relative "robot_wars/ranged_combat_resolver"
 require_relative "robot_wars/turn_resolver"
 require_relative "robot_wars/game"
+require_relative "robot_wars/action_parser"
+require_relative "robot_wars/model_spec"
+require_relative "robot_wars/game_rules"
+require_relative "robot_wars/sensing_report"
+require_relative "robot_wars/warrior"
+require_relative "robot_wars/llm_pilot"
 
 module RobotWars
   # Raised for RobotWars-specific misuse.

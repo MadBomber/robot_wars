@@ -35,13 +35,22 @@ module RobotWars
       @owner_by_position.delete_if { |_position, owner| owner == robot }
     end
 
+    def each_owned(&block)
+      return enum_for(:each_owned) unless block
+
+      @owner_by_position.each_pair(&block)
+    end
+
     # Advances every square's occupation streak from who is standing
     # there this turn, claiming ownership on the 3rd consecutive turn.
+    # Returns the squares that BECAME owned on this tick as
+    # {position => robot} — squares the robot already owned don't
+    # reappear on later ticks.
     def tick!(occupancy_map)
       current_by_position = occupancy_map.each_occupied.to_h
 
       stale_positions(current_by_position).each { |position| @streak_by_position.delete(position) }
-      current_by_position.each_pair { |position, robot| record_occupation(position, robot) }
+      current_by_position.filter_map { |position, robot| record_occupation(position, robot) }.to_h
     end
 
     private
@@ -52,10 +61,15 @@ module RobotWars
       end
     end
 
+    # Advances the square's streak; returns [position, robot] when the
+    # occupation just turned into NEW ownership, nil otherwise.
     def record_occupation(position, robot)
       streak = (@streak_by_position[position] ||= { robot: robot, count: 0 })
       streak[:count] += 1
-      claim!(position, robot) if streak.fetch(:count) >= TURNS_TO_OWN_BY_OCCUPATION
+      return nil if streak.fetch(:count) < TURNS_TO_OWN_BY_OCCUPATION || owned_by?(position, robot)
+
+      claim!(position, robot)
+      [position, robot]
     end
   end
 end

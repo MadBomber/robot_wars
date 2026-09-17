@@ -15,12 +15,13 @@ module RobotWars
       )
     end
 
-    # Places robots on distinct random squares (rule 6).
-    def self.start(board:, robot_ids:, roll_generator: RollGenerator.new, random: Random.new)
+    # Places robots on distinct random squares (rule 6), each starting
+    # with `life` points (rule 5's 100 unless the match says otherwise).
+    def self.start(board:, robot_ids:, life: Robot::STARTING_LIFE, roll_generator: RollGenerator.new, random: Random.new)
       game = new(board: board, roll_generator: roll_generator, random: random)
       positions = board.sample_positions(robot_ids.size, random: random)
 
-      robot_ids.zip(positions).each { |id, position| game.add_robot(Robot.new(id: id), position) }
+      robot_ids.zip(positions).each { |id, position| game.add_robot(Robot.new(id: id, life: life), position) }
       game
     end
 

@@ -14,3 +14,5 @@
 # quality-gate artifacts (baseline + last run output)
 /.quality/
 *_output.txt
+
+notes.md

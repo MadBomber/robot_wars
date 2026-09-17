@@ -22,6 +22,17 @@ class RobotWars::TerritoryTest < Minitest::Test
     assert @territory.owned_by_other?(@square, @rival)
   end
 
+  def test_each_owned_yields_every_owned_square_and_its_owner
+    other_square = RobotWars::Position.new(x: 3, y: 3)
+    @territory.claim!(@square, @robot)
+    @territory.claim!(other_square, @rival)
+
+    pairs = @territory.each_owned.to_a
+
+    assert_includes pairs, [@square, @robot]
+    assert_includes pairs, [other_square, @rival]
+  end
+
   def test_release_frees_every_square_the_robot_owned
     other_square = RobotWars::Position.new(x: 3, y: 3)
     @territory.claim!(@square, @robot)
@@ -45,13 +56,29 @@ class RobotWars::TerritoryTest < Minitest::Test
     map.place(@robot, @square)
 
     2.times do
-      @territory.tick!(map)
+      assert_empty @territory.tick!(map)
       refute @territory.owned?(@square)
     end
 
-    @territory.tick!(map)
-
+    assert_equal({ @square => @robot }, @territory.tick!(map))
     assert @territory.owned_by?(@square, @robot)
+  end
+
+  def test_tick_does_not_re_report_a_square_already_owned
+    map = RobotWars::OccupancyMap.new
+    map.place(@robot, @square)
+    3.times { @territory.tick!(map) }
+
+    assert_empty @territory.tick!(map)
+    assert @territory.owned_by?(@square, @robot)
+  end
+
+  def test_tick_does_not_report_a_square_the_streak_holder_already_conquered
+    map = RobotWars::OccupancyMap.new
+    map.place(@robot, @square)
+    @territory.claim!(@square, @robot)
+
+    3.times { assert_empty @territory.tick!(map) }
   end
 
   def test_leaving_a_square_and_returning_resets_the_streak

@@ -14,5 +14,16 @@ module RobotWars
     ].freeze
 
     NORTH, NORTHEAST, EAST, SOUTHEAST, SOUTH, SOUTHWEST, WEST, NORTHWEST = OFFSETS
+
+    NAMES = {
+      NORTH => "north", NORTHEAST => "northeast",
+      EAST => "east", SOUTHEAST => "southeast",
+      SOUTH => "south", SOUTHWEST => "southwest",
+      WEST => "west", NORTHWEST => "northwest"
+    }.freeze
+
+    # The compass name of a direction offset, for showing a move to a
+    # human ("north"), or nil for a position that isn't a direction.
+    def self.name_of(offset) = NAMES[offset]
   end
 end
