@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="420" viewBox="0 0 560 420" font-family="Menlo, Consolas, monospace">
+  <!-- Dark theme, transparent background -->
+  <defs>
+    <style>
+      .cell    { fill: #1e2430; stroke: #3a4356; stroke-width: 1; }
+      .label   { fill: #8b95a8; font-size: 12px; }
+      .title   { fill: #c9d3e4; font-size: 16px; font-weight: bold; }
+      .legend  { fill: #aab4c6; font-size: 12px; }
+    </style>
+  </defs>
+
+  <text x="30" y="26" class="title">RobotWars — one robot per square, simultaneous moves</text>
+
+  <!-- 6x5 board, 70px squares -->
+  <g transform="translate(30,50)">
+    <!-- squares -->
+    <g>
+      <!-- rows -->
+      <g id="row">
+        <rect class="cell" x="0"   y="0" width="70" height="70"/>
+        <rect class="cell" x="70"  y="0" width="70" height="70"/>
+        <rect class="cell" x="140" y="0" width="70" height="70"/>
+        <rect class="cell" x="210" y="0" width="70" height="70"/>
+        <rect class="cell" x="280" y="0" width="70" height="70"/>
+        <rect class="cell" x="350" y="0" width="70" height="70"/>
+      </g>
+      <use href="#row" y="70"/>
+      <use href="#row" y="140"/>
+      <use href="#row" y="210"/>
+      <use href="#row" y="280"/>
+    </g>
+
+    <!-- Robot icons: distinct colors per player -->
+    <!-- Robot A (cyan) at (1,1) -->
+    <g transform="translate(70,70)">
+      <rect x="17" y="22" width="36" height="30" rx="6" fill="#22d3ee"/>
+      <rect x="24" y="10" width="22" height="14" rx="4" fill="#22d3ee"/>
+      <circle cx="30" cy="17" r="2.5" fill="#0b1220"/>
+      <circle cx="40" cy="17" r="2.5" fill="#0b1220"/>
+      <line x1="35" y1="10" x2="35" y2="4" stroke="#22d3ee" stroke-width="2"/>
+      <circle cx="35" cy="3" r="2.5" fill="#22d3ee"/>
+    </g>
+
+    <!-- Robot B (amber) at (4,1) -->
+    <g transform="translate(280,70)">
+      <rect x="17" y="22" width="36" height="30" rx="6" fill="#fbbf24"/>
+      <rect x="24" y="10" width="22" height="14" rx="4" fill="#fbbf24"/>
+      <circle cx="30" cy="17" r="2.5" fill="#0b1220"/>
+      <circle cx="40" cy="17" r="2.5" fill="#0b1220"/>
+      <line x1="35" y1="10" x2="35" y2="4" stroke="#fbbf24" stroke-width="2"/>
+      <circle cx="35" cy="3" r="2.5" fill="#fbbf24"/>
+    </g>
+
+    <!-- Robot C (violet) at (2,3) -->
+    <g transform="translate(140,210)">
+      <rect x="17" y="22" width="36" height="30" rx="6" fill="#a78bfa"/>
+      <rect x="24" y="10" width="22" height="14" rx="4" fill="#a78bfa"/>
+      <circle cx="30" cy="17" r="2.5" fill="#0b1220"/>
+      <circle cx="40" cy="17" r="2.5" fill="#0b1220"/>
+      <line x1="35" y1="10" x2="35" y2="4" stroke="#a78bfa" stroke-width="2"/>
+      <circle cx="35" cy="3" r="2.5" fill="#a78bfa"/>
+    </g>
+
+    <!-- Simultaneous move arrows -->
+    <g stroke-width="3" fill="none" stroke-linecap="round">
+      <path d="M 140 105 h 45" stroke="#22d3ee"/>
+      <path d="M 185 105 l -8 -6 m 8 6 l -8 6" stroke="#22d3ee"/>
+      <path d="M 280 105 h -45" stroke="#fbbf24"/>
+      <path d="M 235 105 l 8 -6 m -8 6 l 8 6" stroke="#fbbf24"/>
+      <path d="M 175 210 v -45" stroke="#a78bfa"/>
+      <path d="M 175 165 l -6 8 m 6 -8 l 6 8" stroke="#a78bfa"/>
+    </g>
+
+    <!-- Conflict marker: two robots targeting the same square -->
+    <g transform="translate(210,70)">
+      <rect x="4" y="4" width="62" height="62" rx="4" fill="none" stroke="#f87171" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="35" y="42" text-anchor="middle" fill="#f87171" font-size="20" font-weight="bold">!</text>
+    </g>
+  </g>
+
+  <!-- Legend -->
+  <g transform="translate(30,406)">
+    <circle cx="6" cy="-4" r="5" fill="#22d3ee"/>
+    <text x="16" y="0" class="legend">robot players (one per square)</text>
+    <rect x="230" y="-12" width="14" height="14" rx="2" fill="none" stroke="#f87171" stroke-width="2" stroke-dasharray="4 3"/>
+    <text x="250" y="0" class="legend">conflict — resolved between turns</text>
+  </g>
+</svg>
