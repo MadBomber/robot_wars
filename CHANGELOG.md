@@ -26,8 +26,11 @@
   the booth — `Announcer` (an LLM persona with its own chat history
   for cross-turn continuity) narrates the lineup, every turn's recap,
   brain-dead removals, and the final result; `SaySpeaker` speaks each
-  call aloud through macOS's `say`. Default brain:
-  `lms/openai/gpt-oss-20b`.
+  call aloud through macOS's `say`. The persona is the warriors
+  directory's `_announcer.md` template, editable like any warrior
+  brain; the shipped example's front matter picks
+  `lms/openai/gpt-oss-20b`, and the flag's optional PROVIDER/MODEL
+  overrides it.
 
 ## [0.1.1] - 2026-09-17
 

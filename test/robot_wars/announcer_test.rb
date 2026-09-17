@@ -56,16 +56,4 @@ class RobotWars::AnnouncerTest < Minitest::Test
     assert_equal "", announcer.announce("turn 1")
     assert_empty speaker.spoken
   end
-
-  def test_default_model_parses_as_a_provider_qualified_model_spec
-    spec = RobotWars::ModelSpec.parse(RobotWars::Announcer::DEFAULT_MODEL)
-
-    assert_equal :lms, spec.provider
-    assert_equal "openai/gpt-oss-20b", spec.model
-  end
-
-  def test_persona_reads_like_broadcast_instructions
-    assert_includes RobotWars::Announcer::PERSONA, "play-by-play announcer"
-    assert_includes RobotWars::Announcer::PERSONA, "ONLY the words"
-  end
 end

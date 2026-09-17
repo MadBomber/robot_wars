@@ -101,11 +101,13 @@ the brain-dead limit, and `--max-turns` as a safety valve against
 stalemates.
 
 Pass `--announcer` to put a radio play-by-play announcer in the booth:
-an LLM persona (default brain `lms/openai/gpt-oss-20b`, override with
-`--announcer PROVIDER/MODEL`) that narrates the lineup, every turn's
-recap, and the final result — and speaks each call aloud through
-macOS's `say`. The match runs at broadcast pace: each turn waits for
-the commentary to finish.
+an LLM persona that narrates the lineup, every turn's recap, and the
+final result — and speaks each call aloud through macOS's `say`. Its
+brain is the warriors directory's `_announcer.md`, a template editable
+exactly like a warrior's (the underscore keeps it out of the roster);
+the shipped example picks `lms/openai/gpt-oss-20b` in its front
+matter, and `--announcer PROVIDER/MODEL` overrides that. The match
+runs at broadcast pace: each turn waits for the commentary to finish.
 
 `examples/warriors/` has five ready-made brains with distinct
 personalities — a fight between them exercises very different play
