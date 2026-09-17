@@ -449,6 +449,129 @@ class RobotWars::TurnResolverTest < Minitest::Test
     assert_includes report.deaths, victim
   end
 
+  # --- The ordered event stream (Report#events) ----------------------
+
+  def test_events_open_with_every_robots_declared_action
+    mover = place("mover", life: 100, at: [1, 1])
+    sitter = place("sitter", life: 100, at: [0, 0])
+
+    report = resolve(
+      mover => RobotWars::Action.move(RobotWars::Direction::NORTH),
+      sitter => RobotWars::Action.stay
+    )
+
+    declared = report.events.grep(RobotWars::TurnResolver::Declared)
+    assert_equal(%w[mover sitter], declared.map { |event| event.robot.id })
+    assert_equal "mover: MOVE north to (1,0)", declared.first.to_s
+    assert_equal({ type: :action, robot: "mover", action: "MOVE north", origin: { x: 1, y: 1 } },
+                 declared.first.to_h)
+  end
+
+  def test_events_record_the_declared_action_not_the_rule_43_downgrade
+    robot = place("r1", life: 10, at: [1, 1])
+    resolver = turn_resolver(illegal_move_resolver: illegal_move_resolver(rolls: [6]))
+
+    report = resolver.resolve!(robot => RobotWars::Action.attack(square: pos(0, 0), points: 11))
+
+    declared = report.events.grep(RobotWars::TurnResolver::Declared).first
+    assert_equal "ATTACK 0,0 11", declared.action.to_s
+    assert_includes report.events, report.solo_conflicts.first
+  end
+
+  def test_events_carry_the_conflict_and_its_conquest_claim_in_order
+    strong = place("strong", life: 100, at: [0, 1])
+    weak = place("weak", life: 90, at: [2, 1])
+    resolver = turn_resolver(conflict_resolver: conflict_resolver(rolls: [5]))
+
+    report = resolver.resolve!(
+      strong => RobotWars::Action.move(RobotWars::Direction::EAST),
+      weak => RobotWars::Action.move(RobotWars::Direction::WEST)
+    )
+
+    conflict = report.conflicts.first
+    claim = report.claims.first
+    assert_operator report.events.index(conflict), :<, report.events.index(claim)
+    assert_equal({ type: :conflict, square: { x: 1, y: 1 }, robots: %w[strong weak], roll: 5,
+                   winner: "strong", losers: ["weak"], winner_died: false }, conflict.to_h)
+    assert_equal({ type: :claim, robot: "strong", square: { x: 1, y: 1 } }, claim.to_h)
+    assert_equal "strong now owns (1,1)", claim.to_s
+  end
+
+  def test_a_solo_conflict_serializes_into_the_stream
+    robot = place("r1", life: 100, at: [1, 1])
+    resolver = turn_resolver(illegal_move_resolver: illegal_move_resolver(rolls: [6]))
+
+    report = resolver.resolve!(robot => RobotWars::Action.invalid)
+
+    assert_equal({ type: :solo_conflict, robot: "r1", roll: 6 }, report.solo_conflicts.first.to_h)
+  end
+
+  def test_a_displacement_is_an_event_a_spectator_can_see
+    # The defender loses at the square it never left (its origin IS the
+    # battlefield), so it goes straight to displacement (rules 19-20).
+    defender = place("defender", life: 90, at: [1, 1])
+    invader = place("invader", life: 100, at: [2, 1])
+    resolver = turn_resolver(conflict_resolver: conflict_resolver(rolls: [5]))
+
+    report = resolver.resolve!(
+      defender => RobotWars::Action.stay,
+      invader => RobotWars::Action.move(RobotWars::Direction::WEST)
+    )
+
+    displaced = report.events.grep(RobotWars::TurnResolver::Displaced).first
+    assert_equal defender, displaced.robot
+    assert_equal pos(1, 1), displaced.from
+    assert_equal @occupancy.position_of(defender), displaced.to
+    assert_equal "defender is displaced to (#{displaced.to.x},#{displaced.to.y})", displaced.to_s
+    assert_equal({ type: :displaced, robot: "defender", from: { x: 1, y: 1 }, to: displaced.to.to_h },
+                 displaced.to_h)
+  end
+
+  def test_a_death_is_an_event_at_the_end_of_the_stream
+    attacker = place("attacker", life: 100, at: [0, 0])
+    victim = place("victim", life: 5, at: [2, 2])
+
+    report = resolve(
+      attacker => RobotWars::Action.attack(square: pos(2, 2), points: 10),
+      victim => RobotWars::Action.stay
+    )
+
+    death = report.events.grep(RobotWars::TurnResolver::Death).first
+    assert_equal victim, death.robot
+    assert_equal "victim is destroyed", death.to_s
+    assert_equal({ type: :death, robot: "victim" }, death.to_h)
+    assert_includes report.events, report.ranged_effects.first
+  end
+
+  def test_a_tied_conflict_serializes_with_no_winner
+    first = place("first", life: 100, at: [0, 1])
+    second = place("second", life: 100, at: [2, 1])
+    resolver = turn_resolver(conflict_resolver: conflict_resolver(rolls: [5]))
+
+    report = resolver.resolve!(
+      first => RobotWars::Action.move(RobotWars::Direction::EAST),
+      second => RobotWars::Action.move(RobotWars::Direction::WEST)
+    )
+
+    assert_nil report.conflicts.first.to_h.fetch(:winner)
+  end
+
+  def test_every_event_serializes_with_a_type
+    strong = place("strong", life: 100, at: [0, 1])
+    weak = place("weak", life: 5, at: [2, 1])
+    resolver = turn_resolver(conflict_resolver: conflict_resolver(rolls: [5]))
+
+    report = resolver.resolve!(
+      strong => RobotWars::Action.move(RobotWars::Direction::EAST),
+      weak => RobotWars::Action.move(RobotWars::Direction::WEST)
+    )
+
+    report.events.each do |event|
+      assert_kind_of Symbol, event.to_h.fetch(:type)
+      assert_kind_of String, event.to_s
+    end
+  end
+
   private
 
   def pos(x, y) = RobotWars::Position.new(x: x, y: y)

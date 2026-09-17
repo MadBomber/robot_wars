@@ -87,6 +87,57 @@ class RobotWars::RangedCombatResolverTest < Minitest::Test
     assert_equal 99, @target.life
   end
 
+  # --- Effects as narrated turn events --------------------------------
+
+  def test_a_hit_narrates_the_square_the_victim_and_the_damage
+    effects = @resolver.resolve(attacks: [attack_order(points: 12)], defenses: [])
+
+    effect = effects.first
+    assert_equal @square, effect.square
+    assert_equal "attacker's attack on (4,4) was a HIT — target loses 12", effect.to_s
+    assert_equal({ type: :ranged, kind: :hit, robot: "target", amount: 12, source: "attacker",
+                   square: { x: 4, y: 4 } }, effect.to_h)
+  end
+
+  def test_a_miss_narrates_the_empty_square
+    empty_square = RobotWars::Position.new(x: 0, y: 0)
+
+    effects = @resolver.resolve(attacks: [attack_order(square: empty_square, points: 5)], defenses: [])
+
+    effect = effects.first
+    assert_equal "attacker's attack on (0,0) was a MISS", effect.to_s
+    assert_nil effect.to_h.fetch(:robot)
+  end
+
+  def test_an_off_board_shot_narrates_the_self_inflicted_cost
+    effects = @resolver.resolve(attacks: [attack_order(square: RobotWars::Position.new(x: -1, y: 3), points: 5)],
+                                defenses: [])
+
+    assert_equal "attacker's attack was OFF THE BOARD — loses 3", effects.first.to_s
+  end
+
+  def test_counter_fire_narrates_who_burned_whom
+    effects = @resolver.resolve(attacks: [attack_order(points: 5)], defenses: [defend_order(points: 10)])
+
+    counter = effects.find { |effect| effect.kind == :counter_fire }
+    assert_equal "target's counter-fire hits attacker for 10", counter.to_s
+    assert_equal({ type: :ranged, kind: :counter_fire, robot: "attacker", amount: 10, source: "target",
+                   square: nil }, counter.to_h)
+  end
+
+  def test_an_unknown_effect_kind_refuses_to_narrate
+    effect = RobotWars::RangedCombatResolver::Effect.new(kind: :bogus, robot: nil, amount: 0, source: nil)
+
+    assert_raises(NoMatchingPatternError) { effect.to_s }
+  end
+
+  def test_an_unchallenged_defense_narrates_the_bracing_premium
+    effects = @resolver.resolve(attacks: [], defenses: [defend_order(points: 10)])
+
+    assert_equal "target defended against nothing — loses 1", effects.first.to_s
+    assert_nil effects.first.to_h.fetch(:source)
+  end
+
   private
 
   def attack_order(points:, attacker: @attacker, square: @square)

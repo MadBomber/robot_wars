@@ -2,15 +2,30 @@
 
 ## [Unreleased]
 
-- `--browser [PORT]`: a browser spectator view of the match — the
-  initial cut serves a frozen snapshot of the starting board (SVG
-  grid, one colored robot icon per warrior, a color/life/square
-  legend) from a stdlib-only HTTP server (`SpectatorServer`) on a
-  background thread and opens it in the default browser
-  (`BrowserOpener`: `open`/`start`/`xdg-open`). Rendering is split
-  into `SvgBoard` (transparent-background SVG drawing) and
-  `SpectatorPage` (dark-themed HTML that snapshots the game at
-  construction, so serving never races the match loop).
+- The turn-event stream: `TurnResolver::Report#events` is the ordered,
+  typed record of everything a turn did — declared actions, solo
+  conflicts, conflicts, displacements, ranged effects, deaths, and
+  territory claims — each event with a `#to_s` transcript line and a
+  `#to_h` JSON shape. New event types `Declared`, `Displaced`, `Death`;
+  `Claim` and ranged `Effect` learned to narrate and serialize, and
+  `Effect` now carries the attacked square. `TurnNarrator` renders a
+  report into the play-by-play lines used by BOTH the terminal
+  transcript and the browser panel; the transcript now also announces
+  displacements, counter-fire, unchallenged-defense premiums, and
+  deaths — outcomes it previously kept silent — and HIT/MISS lines
+  name the attacked square and damage.
+- `--browser [PORT]` is now a LIVE spectator: one SSE update per
+  resolved turn re-renders the board (robot icons with life numbers,
+  territory shaded in the owner's color), the legend (fallen warriors
+  keep a dimmed † row, colors stay roster-stable), the status line,
+  and a scrolling play-by-play panel of the exact transcript lines.
+  `SpectatorServer` grew a thread-per-connection `/events` SSE
+  endpoint with latest-update replay for late joiners, and
+  `SpectatorUpdate` builds each turn's idempotent JSON payload
+  (fragments + full log + the turn's events) on the match thread —
+  still no dependencies beyond the standard library. The final update
+  closes the browser's stream, so the finished board stays on screen
+  after the process exits.
 - RULES.md gained rules 41 (unparsable pilot reply = rule 21 solo
   conflict) and 42 (Battleship-style HIT/MISS attack feedback),
   documenting behavior already implemented.

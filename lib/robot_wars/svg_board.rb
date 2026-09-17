@@ -8,8 +8,17 @@ module RobotWars
   # coordinate direction. The drawing has a transparent background —
   # whatever hosts it (SpectatorPage's dark theme) shows through.
   class SvgBoard
-    # One icon to draw: a robot's id, its board square, and its color.
-    Icon = Data.define(:id, :x, :y, :color)
+    # One icon to draw: a robot's id, its board square, its color, and
+    # (when known) its life points to print beside it.
+    Icon = Data.define(:id, :x, :y, :color, :life) do
+      # :reek:UncommunicativeParameterName -- x and y ARE the communicative names for grid coordinates.
+      def initialize(id:, x:, y:, color:, life: nil)
+        super
+      end
+    end
+
+    # One owned square to shade in its owner's color.
+    OwnedSquare = Data.define(:x, :y, :color)
 
     # Distinct hues that stay readable on a dark background; assigned to
     # robots by roster index, cycling when a match outgrows the palette.
@@ -28,15 +37,18 @@ module RobotWars
     # @param width [Integer] board squares across
     # @param height [Integer] board squares down
     # @param icons [Array<Icon>] the robots to draw
-    def initialize(width:, height:, icons: [])
+    # @param owned [Array<OwnedSquare>] territory to shade
+    def initialize(width:, height:, icons: [], owned: [])
       @width = width
       @height = height
       @icons = icons
+      @owned = owned
     end
 
     def to_s
       <<~SVG
         <svg xmlns="http://www.w3.org/2000/svg" width="#{pixel_width}" height="#{pixel_height}" viewBox="0 0 #{pixel_width} #{pixel_height}">
+        #{territory_rects.join("\n")}
         #{grid_lines.join("\n")}
         #{axis_labels.join("\n")}
         #{@icons.map { |icon| icon_svg(icon) }.join("\n")}
@@ -48,6 +60,17 @@ module RobotWars
 
     def pixel_width  = MARGIN + (@width * CELL) + PAD
     def pixel_height = MARGIN + (@height * CELL) + PAD
+
+    # Owned squares wear their owner's color as a translucent wash —
+    # under the grid lines, so the lattice stays crisp.
+    # :reek:UncommunicativeVariableName -- x and y ARE the communicative names for grid coordinates.
+    def territory_rects
+      @owned.map do |square|
+        square => { x:, y:, color: }
+        %(<rect x="#{MARGIN + (x * CELL)}" y="#{MARGIN + (y * CELL)}" ) +
+          %(width="#{CELL}" height="#{CELL}" fill="#{color}" fill-opacity="0.22"/>)
+      end
+    end
 
     def grid_lines = vertical_lines + horizontal_lines
 
@@ -88,21 +111,30 @@ module RobotWars
     # the robot's own color so the icon alone identifies it.
     # :reek:FeatureEnvy -- drawing an icon means reading every one of its fields; there is nowhere better for this to live.
     def icon_svg(icon)
-      icon => { x:, y:, color: }
+      icon => { x:, y:, color:, life: }
       cx = center(x)
       cy = center(y)
       id = ERB::Util.html_escape(icon.id)
       <<~ICON.chomp
         <g>
-        <title>#{id} at (#{x},#{y})</title>
+        <title>#{id} at (#{x},#{y})#{" — life #{life}" if life}</title>
         <line x1="#{cx}" y1="#{cy - 14}" x2="#{cx}" y2="#{cy - 20}" stroke="#{color}" stroke-width="2"/>
         <circle cx="#{cx}" cy="#{cy - 20}" r="2" fill="#{color}"/>
         <circle cx="#{cx}" cy="#{cy}" r="14" fill="#{color}"/>
         <circle cx="#{cx - 5}" cy="#{cy - 3}" r="2.5" fill="#{EYE_COLOR}"/>
         <circle cx="#{cx + 5}" cy="#{cy - 3}" r="2.5" fill="#{EYE_COLOR}"/>
-        <text x="#{cx}" y="#{cy + 23}" text-anchor="middle" font-family="#{FONT}" font-size="9" fill="#{color}">#{id}</text>
+        #{life_text(cx, cy, color, life)}<text x="#{cx}" y="#{cy + 23}" text-anchor="middle" font-family="#{FONT}" font-size="9" fill="#{color}">#{id}</text>
         </g>
       ICON
+    end
+
+    # The life count in the cell's top-right corner, next to the head.
+    # :reek:UtilityFunction :reek:LongParameterList -- four scalars of one icon's drawing state; private plumbing.
+    def life_text(cx, cy, color, life)
+      return "" unless life
+
+      %(<text x="#{cx + 22}" y="#{cy - 13}" text-anchor="end" font-family="#{FONT}" font-size="10" ) +
+        %(font-weight="600" fill="#{color}">#{life}</text>\n)
     end
   end
 end

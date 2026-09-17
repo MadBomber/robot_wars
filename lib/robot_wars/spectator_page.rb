@@ -2,25 +2,33 @@ require "erb"
 
 module RobotWars
   # The browser spectator's page: a dark-themed HTML document holding
-  # the SvgBoard drawing and a legend mapping each robot's color to its
-  # id, life, and square. This is the referee's God view — it shows
-  # everything rule 33's sensing hides from the players, and must never
-  # feed back into them.
+  # the SvgBoard drawing (icons, life numbers, territory shading), a
+  # legend mapping each robot's color to its id, life, and square, and
+  # a play-by-play log fed live over SSE. This is the referee's God
+  # view — it shows everything rule 33's sensing hides from the
+  # players, and must never feed back into them.
   #
-  # The page captures the game's state at construction time, so it can
-  # be served from another thread while the match mutates the game.
+  # The page captures the game's state at construction time, so its
+  # fragments can be served or published from another thread while the
+  # match mutates the game. `roster` is the match's ORIGINAL robot
+  # list: colors are assigned by roster index so they stay stable as
+  # robots die, and the fallen keep a (dimmed) legend row.
   class SpectatorPage
-    # One robot's snapshot: identity, vitals, square, and legend color.
-    Entry = Data.define(:id, :life, :x, :y, :color)
+    # One robot's snapshot; x/y are nil once it has no square.
+    Entry = Data.define(:id, :life, :x, :y, :color, :alive)
 
-    def initialize(game:)
+    # :reek:ControlParameter -- `roster || game.robots` is an injectable-collaborator fallback, not behavior selection.
+    def initialize(game:, roster: nil)
       board = game.board
       @width = board.width
       @height = board.height
       @turn = game.turn_number
-      @entries = game.robots.each_with_index.map do |robot, index|
-        position = game.occupancy.position_of(robot)
-        Entry.new(id: robot.id, life: robot.life, x: position.x, y: position.y, color: SvgBoard.color_for(index))
+      @tie = game.tie?
+      @winner = game.winner&.id
+      @entries = (roster || game.robots).each_with_index.map { |robot, index| entry_for(game, robot, index) }
+      color_by_id = @entries.to_h { |entry| [entry.id, entry.color] }
+      @owned = game.territory.each_owned.map do |position, robot|
+        SvgBoard::OwnedSquare.new(x: position.x, y: position.y, color: color_by_id.fetch(robot.id))
       end
     end
 
@@ -35,45 +43,87 @@ module RobotWars
         </head>
         <body>
         <h1>RobotWars</h1>
-        <p class="status">#{status_line}</p>
+        <p class="status" id="status">#{status_text}</p>
         <div class="arena">
+        <div id="board">
         #{board_svg.chomp}
-        <table class="legend">
-        <tr><th></th><th>warrior</th><th>life</th><th>square</th></tr>
-        #{legend_rows.join("\n")}
-        </table>
         </div>
+        <div class="side">
+        <table class="legend" id="legend">
+        #{legend_html.chomp}
+        </table>
+        <div class="log" id="log"></div>
+        </div>
+        </div>
+        <script>#{script}</script>
         </body>
         </html>
       HTML
     end
 
-    private
-
-    def status_line
-      moment = @turn.zero? ? "initial placement" : "turn #{@turn}"
-      "#{@entries.size} warriors on a #{@width}x#{@height} board &mdash; #{moment}"
+    def status_text
+      if @tie             then "tie — the last warriors fell together on turn #{@turn}"
+      elsif @winner       then "winner: #{@winner} after #{@turn} turns"
+      elsif @turn.zero?   then "#{@entries.size} warriors on a #{@width}x#{@height} board — initial placement"
+      else                     "turn #{@turn} — #{@entries.count(&:alive)} of #{@entries.size} warriors standing"
+      end
     end
 
     def board_svg
-      icons = @entries.map { |entry| icon_for(entry) }
-      SvgBoard.new(width: @width, height: @height, icons: icons).to_s
+      icons = @entries.select(&:alive).map do |entry|
+        entry => { id:, life:, x:, y:, color: }
+        SvgBoard::Icon.new(id: id, x: x, y: y, color: color, life: life)
+      end
+      SvgBoard.new(width: @width, height: @height, icons: icons, owned: @owned).to_s
     end
 
-    # :reek:UtilityFunction :reek:FeatureEnvy -- converting an Entry means reading its fields; private page plumbing.
-    def icon_for(entry)
-      entry => { id:, x:, y:, color: }
-      SvgBoard::Icon.new(id: id, x: x, y: y, color: color)
+    def legend_html
+      rows = ["<tr><th></th><th>warrior</th><th>life</th><th>square</th></tr>"]
+      rows.concat(@entries.map { |entry| legend_row(entry) })
+      "#{rows.join("\n")}\n"
     end
 
-    def legend_rows = @entries.map { |entry| legend_row(entry) }
+    private
+
+    # A robot with no square is out of the match — dead, or removed as
+    # brain dead — and keeps a dimmed legend row.
+    def entry_for(game, robot, index)
+      position = game.occupancy.position_of(robot)
+      Entry.new(id: robot.id, life: robot.life, x: position&.x, y: position&.y,
+                color: SvgBoard.color_for(index), alive: !position.nil?)
+    end
 
     # :reek:UtilityFunction :reek:FeatureEnvy -- rendering an Entry means reading its fields; private page plumbing.
     def legend_row(entry)
-      entry => { id:, life:, x:, y:, color: }
+      entry => { id:, life:, x:, y:, color:, alive: }
       swatch = %(<td><span class="swatch" style="background:#{color}"></span></td>)
-      cells = [ERB::Util.html_escape(id), life, "(#{x},#{y})"]
-      "<tr>#{swatch}#{cells.map { |cell| "<td>#{cell}</td>" }.join}</tr>"
+      cells = alive ? [ERB::Util.html_escape(id), life, "(#{x},#{y})"] : [ERB::Util.html_escape(id), "&dagger;", "&mdash;"]
+      %(<tr#{' class="dead"' unless alive}>#{swatch}#{cells.map { |cell| "<td>#{cell}</td>" }.join}</tr>)
+    end
+
+    # The page keeps itself current from the SSE feed: every update
+    # carries the full re-rendered fragments (idempotent, so refreshes
+    # and EventSource reconnects just work), and the final one closes
+    # the stream, leaving the finished board on screen.
+    def script
+      <<~JS.chomp
+        (function () {
+          var board = document.getElementById("board");
+          var legend = document.getElementById("legend");
+          var status = document.getElementById("status");
+          var log = document.getElementById("log");
+          var es = new EventSource("/events");
+          es.onmessage = function (event) {
+            var update = JSON.parse(event.data);
+            board.innerHTML = update.board_svg;
+            legend.innerHTML = update.legend_html;
+            status.textContent = update.status;
+            log.innerHTML = update.log_html;
+            log.scrollTop = log.scrollHeight;
+            if (update.over) { es.close(); }
+          };
+        })();
+      JS
     end
 
     def style
@@ -86,7 +136,13 @@ module RobotWars
         .legend { border-collapse: collapse; }
         .legend th, .legend td { text-align: left; padding: .3rem .8rem .3rem 0; }
         .legend th { color: #8b949e; font-weight: normal; }
+        .legend .dead { opacity: .45; }
         .swatch { display: inline-block; width: .85em; height: .85em; border-radius: 50%; }
+        .log { margin-top: 1.2rem; max-height: 22rem; min-width: 26rem; overflow-y: auto;
+               background: #161b22; border-radius: 6px; padding: .6rem .9rem;
+               font-size: .8rem; line-height: 1.55; color: #c9d1d9; }
+        .log div { white-space: pre-wrap; }
+        .log:empty { display: none; }
       CSS
     end
   end

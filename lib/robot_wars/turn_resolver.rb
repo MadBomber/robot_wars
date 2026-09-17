@@ -14,7 +14,7 @@ module RobotWars
   # losses, so displacing a robot only starts THAT robot's own count.
   # :reek:TooManyMethods -- one small private method per rule 40 step and sub-case; consolidation would bury the sequence.
   class TurnResolver
-    Report = Data.define(:deaths, :ranged_effects, :conflicts, :solo_conflicts, :claims) do
+    Report = Data.define(:deaths, :ranged_effects, :conflicts, :solo_conflicts, :claims, :events) do
       # Battleship-style feedback for an attacker: :hit when this
       # robot's attack this turn found a robot on the target square,
       # :miss when it found the square empty, nil when it didn't attack.
@@ -35,7 +35,36 @@ module RobotWars
     end
 
     # One square becoming newly owned during the turn (rules 22-23).
-    Claim = Data.define(:robot, :square)
+    Claim = Data.define(:robot, :square) do
+      def to_s = "#{robot.id} now owns (#{square.x},#{square.y})"
+
+      def to_h = { type: :claim, robot: robot.id, square: square.to_h }
+    end
+
+    # One robot's declared action for the turn, with the square it was
+    # standing on when it declared — the transcript's raw material.
+    Declared = Data.define(:robot, :action, :origin) do
+      def to_s = "#{robot.id}: #{action.describe(origin)}"
+
+      def to_h = { type: :action, robot: robot.id, action: action.to_s, origin: origin.to_h }
+    end
+
+    # A defeated robot moved by the referee to a free neighbor (rule 19)
+    # — the one repositioning a spectator could never infer from the
+    # actions alone. `from` is the square it failed to stand on.
+    Displaced = Data.define(:robot, :from, :to) do
+      def to_s = "#{robot.id} is displaced to (#{to.x},#{to.y})"
+
+      def to_h = { type: :displaced, robot: robot.id, from: from.to_h, to: to.to_h }
+    end
+
+    # A robot leaving the game (rules 36-38) — by life reaching 0 or by
+    # displacement with nowhere to stand (rule 20).
+    Death = Data.define(:robot) do
+      def to_s = "#{robot.id} is destroyed"
+
+      def to_h = { type: :death, robot: robot.id }
+    end
 
     # One resolved square conflict (rules 13-16), kept on the Report so a
     # match transcript can say what happened, not just the resulting life
@@ -57,12 +86,19 @@ module RobotWars
         else                "tie, everyone loses"
         end
       end
+
+      def to_h
+        { type: :conflict, square: square.to_h, robots: robots.map(&:id), roll: roll,
+          winner: winner&.id, losers: losers.map(&:id), winner_died: winner_died }
+      end
     end
 
     # One rule 21 solo conflict — an invalid action or illegal move
     # punished with a random hit and no movement.
     SoloConflict = Data.define(:robot, :roll) do
       def to_s = "solo conflict: #{robot.id} — roll #{roll}, no movement"
+
+      def to_h = { type: :solo_conflict, robot: robot.id, roll: roll }
     end
 
     # :reek:ControlParameter -- `x || Default.new` is an injectable-collaborator fallback, not behavior selection.
@@ -78,6 +114,7 @@ module RobotWars
       @conflicts = []
       @solo_conflicts = []
       @claims = []
+      @events = []
     end
 
     # actions: Hash{Robot => Action}, exactly one entry per living robot
@@ -85,6 +122,7 @@ module RobotWars
     # :reek:TooManyStatements -- the rule 40 turn sequence, one linear step per phase; splitting it would hide the order.
     def resolve!(actions)
       reset_turn_log
+      record_declarations(actions)
       actions = actions.to_h { |robot, action| [robot, effective_action(robot, action)] }
       origins = actions.keys.to_h { |robot| [robot, @occupancy.position_of(robot)] }
 
@@ -94,22 +132,41 @@ module RobotWars
       commit_occupancy(settled)
 
       ranged_effects = resolve_ranged_combat(actions)
+      @events.concat(ranged_effects)
       deaths = process_deaths(eliminated)
+      deaths.each { |robot| @events << Death.new(robot: robot) }
 
-      @territory.tick!(@occupancy).each { |square, robot| @claims << Claim.new(robot: robot, square: square) }
+      @territory.tick!(@occupancy).each { |square, robot| record_claim(Claim.new(robot: robot, square: square)) }
 
       Report.new(deaths: deaths, ranged_effects: ranged_effects,
-                 conflicts: @conflicts, solo_conflicts: @solo_conflicts, claims: @claims)
+                 conflicts: @conflicts, solo_conflicts: @solo_conflicts, claims: @claims, events: @events)
     end
 
     private
 
     # The per-turn event log the Report is built from, emptied at the
-    # top of every resolve!.
+    # top of every resolve!. `events` is the ordered stream of everything
+    # that happened; the typed lists remain as indexed views into it.
     def reset_turn_log
       @conflicts = []
       @solo_conflicts = []
       @claims = []
+      @events = []
+    end
+
+    # The transcript's opening block: what every robot declared, AS
+    # declared — a rule 43 overcommitment shows the pilot's actual
+    # command here, with its punishment appearing as the solo conflict
+    # that follows.
+    def record_declarations(actions)
+      actions.each do |robot, action|
+        @events << Declared.new(robot: robot, action: action, origin: @occupancy.position_of(robot))
+      end
+    end
+
+    def record_claim(claim)
+      @claims << claim
+      @events << claim
     end
 
     # Rule 43: committing more points than the robot's current life —
@@ -156,7 +213,9 @@ module RobotWars
 
     def punish_solo_conflict(robot)
       result = @illegal_move_resolver.resolve(robot)
-      @solo_conflicts << SoloConflict.new(robot: robot, roll: result.roll)
+      event = SoloConflict.new(robot: robot, roll: result.roll)
+      @solo_conflicts << event
+      @events << event
     end
 
     # A robot can die during the movement phase itself — a solo-conflict
@@ -206,8 +265,10 @@ module RobotWars
 
       @conflict_resolver.resolve(contenders) => { winner:, losers:, roll: }
       winner_died = winner ? winner.dead? : false
-      @conflicts << Conflict.new(square: square, robots: contenders, roll: roll,
-                                 winner: winner, losers: losers, winner_died: winner_died)
+      conflict = Conflict.new(square: square, robots: contenders, roll: roll,
+                              winner: winner, losers: losers, winner_died: winner_died)
+      @conflicts << conflict
+      @events << conflict
 
       if winner && !winner_died
         settled[square] = winner
@@ -230,7 +291,7 @@ module RobotWars
     # conflict never happens on a square its winner already holds.
     def record_conquest(square, winner)
       @territory.claim!(square, winner)
-      @claims << Claim.new(robot: winner, square: square)
+      record_claim(Claim.new(robot: winner, square: square))
     end
 
     # :reek:LongParameterList -- the cascade's working state (origins/settled/defeats/eliminated/queue) is one
@@ -270,7 +331,9 @@ module RobotWars
         robot.eliminate!
         eliminated << robot
       else
-        settled[candidates.sample(random: @random)] = robot
+        square = candidates.sample(random: @random)
+        settled[square] = robot
+        @events << Displaced.new(robot: robot, from: near, to: square)
       end
     end
 

@@ -46,6 +46,23 @@ class RobotWars::SvgBoardTest < Minitest::Test
     assert_includes svg, %(fill="#4fc3f7">alpha</text>)
   end
 
+  def test_an_icon_with_life_prints_it_beside_the_head_and_in_the_tooltip
+    icon = RobotWars::SvgBoard::Icon.new(id: "alpha", x: 0, y: 0, color: "#4fc3f7", life: 87)
+    svg = RobotWars::SvgBoard.new(width: 1, height: 1, icons: [icon]).to_s
+
+    assert_includes svg, %(<title>alpha at (0,0) — life 87</title>)
+    assert_includes svg, %(font-weight="600" fill="#4fc3f7">87</text>)
+  end
+
+  def test_owned_squares_are_washed_in_their_owners_color_under_the_grid
+    owned = RobotWars::SvgBoard::OwnedSquare.new(x: 1, y: 0, color: "#81c784")
+    svg = RobotWars::SvgBoard.new(width: 2, height: 1, owned: [owned]).to_s
+
+    rect = %(<rect x="#{MARGIN + CELL}" y="#{MARGIN}" width="#{CELL}" height="#{CELL}" fill="#81c784" fill-opacity="0.22"/>)
+    assert_includes svg, rect
+    assert_operator svg.index(rect), :<, svg.index("<line"), "territory must be painted under the grid lines"
+  end
+
   def test_robot_ids_are_html_escaped
     icon = RobotWars::SvgBoard::Icon.new(id: "<sneaky>", x: 0, y: 0, color: "#4fc3f7")
     svg = RobotWars::SvgBoard.new(width: 1, height: 1, icons: [icon]).to_s

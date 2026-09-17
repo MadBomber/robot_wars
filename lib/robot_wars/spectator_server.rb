@@ -1,12 +1,13 @@
 require "socket"
 
 module RobotWars
-  # A tiny HTTP server for the browser spectator view, on the Ruby
-  # standard library alone (no rack/sinatra dependency for one page).
-  # It serves a single fixed HTML document — static content, so the
-  # accept loop's background thread shares no mutable state with the
-  # match running on the main thread. Requests are handled one at a
-  # time, which is plenty for a localhost page.
+  # The browser spectator's HTTP server, on the Ruby standard library
+  # alone (no rack/sinatra dependency for one page and a feed). "/"
+  # serves the fixed page shell; "/events" is a Server-Sent Events
+  # stream that replays the latest published update on connect and then
+  # pushes each new one. Each connection gets its own thread; the only
+  # state they share are frozen strings and per-subscriber Queues, all
+  # handed over under one mutex — server threads never touch the game.
   class SpectatorServer
     attr_reader :host
 
@@ -19,6 +20,11 @@ module RobotWars
       @requested_port = port
       @server = nil
       @thread = nil
+      @mutex = Mutex.new
+      @subscribers = []
+      @client_threads = []
+      @latest = nil
+      @stopping = false
     end
 
     def start
@@ -36,25 +42,57 @@ module RobotWars
 
     def url = "http://#{host}:#{port}/"
 
+    # Pushes one update to every connected spectator and remembers it
+    # as the replay for whoever connects next.
+    def publish(message)
+      @mutex.synchronize do
+        @latest = message.dup.freeze
+        @subscribers.each { |queue| queue << @latest }
+      end
+      self
+    end
+
     def stop
+      halt_feeds
       @server&.close
       @thread&.join
+      @mutex.synchronize { @client_threads.dup }.each(&:join)
       self
     end
 
     private
 
+    # Ends every open /events feed: each subscriber's queue gets the
+    # stop sentinel AFTER anything already published, so the final
+    # update is delivered before the connection closes.
+    def halt_feeds
+      @mutex.synchronize do
+        @stopping = true
+        @subscribers.each { |queue| queue << :stop }
+      end
+    end
+
     def accept_loop
-      loop { handle(@server.accept) }
+      loop do
+        client = @server.accept
+        thread = Thread.new { serve_client(client) }
+        @mutex.synchronize { @client_threads << thread }
+      end
     rescue IOError, Errno::EBADF
       # stop closed the listening socket out from under accept — the
       # loop's one normal exit.
     end
 
-    def handle(client)
+    def serve_client(client)
       path = read_request_path(client)
-      client.write(path == "/" ? ok_response : not_found_response) if path
-    rescue Errno::EPIPE, Errno::ECONNRESET
+      if path == "/"
+        client.write(ok_response)
+      elsif path == "/events"
+        stream_events(client)
+      elsif path
+        client.write(not_found_response)
+      end
+    rescue Errno::EPIPE, Errno::ECONNRESET, IOError
       # The browser went away mid-request; nothing left to serve it.
     ensure
       client.close
@@ -71,6 +109,42 @@ module RobotWars
         break if line.strip.empty?
       end
       request_line.split[1]
+    end
+
+    # One spectator's SSE feed: headers, the latest update as instant
+    # catch-up, then everything published until the match's final word
+    # (or stop). A vanished browser surfaces as a write error, handled
+    # by serve_client; either way the subscription dies with the loop.
+    def stream_events(client)
+      queue = subscribe
+      client.write(sse_headers)
+      while (message = queue.pop) != :stop
+        client.write("data: #{message}\n\n")
+      end
+    ensure
+      unsubscribe(queue)
+    end
+
+    def subscribe
+      @mutex.synchronize do
+        queue = Queue.new
+        queue << @latest if @latest
+        queue << :stop if @stopping
+        @subscribers << queue
+        queue
+      end
+    end
+
+    def unsubscribe(queue)
+      @mutex.synchronize { @subscribers.delete(queue) }
+    end
+
+    def sse_headers
+      "HTTP/1.1 200 OK\r\n" \
+        "Content-Type: text/event-stream\r\n" \
+        "Cache-Control: no-cache\r\n" \
+        "Connection: close\r\n" \
+        "\r\nretry: 2000\n\n"
     end
 
     def ok_response

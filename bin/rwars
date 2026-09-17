@@ -44,8 +44,8 @@ options = { warriors: default_warriors, width: 10, height: 10, max_turns: 500, s
             browser: nil }
 
 warriors_help  = "Directory of *.md warrior brain templates (default: the gem's examples/warriors)"
-browser_help   = "Watch the match in a web browser (currently: the initial board placement). " \
-                 "PORT fixes the spectator server's port (default: an OS-assigned free port)"
+browser_help   = "Watch the match live in a web browser: board, territory, life, and play-by-play " \
+                 "update every turn. PORT fixes the spectator server's port (default: an OS-assigned free port)"
 timeout_help   = "Seconds a pilot may take to answer each turn before it is declared brain dead " \
                  "and its robot removed from the match (default: #{options[:timeout].to_i})"
 announcer_help = "Add a radio play-by-play announcer who speaks each turn aloud through the " \
@@ -115,14 +115,20 @@ board        = RobotWars::Board.new(width: options[:width], height: options[:hei
 warrior_ids  = brain_files.map { |path| File.basename(path, ".md") }
 game         = RobotWars::Game.start(board: board, robot_ids: warrior_ids, life: options[:life], random: random)
 
-# The browser spectator (phase 2, initial cut): serve a frozen snapshot
-# of the starting board — grid plus each warrior's colored icon — from a
-# background thread, and open it in the default browser. The page is
-# captured before the match starts, so the server never reads game state
-# the match loop is mutating. The server dies with the process; the
-# rendered page stays visible in the browser after the match ends.
+# The browser spectator (phase 2): serve the page shell from a
+# background thread, open it in the default browser, and push one
+# update over SSE per resolved turn — the re-rendered board (icons,
+# life numbers, territory shading), legend, and the play-by-play log.
+# Every update is built HERE on the match thread (the only thread that
+# may read game state) and handed to the server as a frozen JSON
+# string, so serving never races the match loop. `roster` keeps the
+# original lineup: legend rows outlive their robots (dimmed) and
+# colors stay stable as warriors die.
+roster        = game.robots
+spectator     = nil
+spectator_log = []
 if options[:browser]
-  page = RobotWars::SpectatorPage.new(game: game)
+  page = RobotWars::SpectatorPage.new(game: game, roster: roster)
   begin
     spectator = RobotWars::SpectatorServer.new(html: page.to_html, port: options[:browser]).start
   rescue SystemCallError => e
@@ -130,6 +136,14 @@ if options[:browser]
   end
   puts "spectator view: #{spectator.url}"
   RobotWars::BrowserOpener.new.call(spectator.url) || puts("could not launch a browser — open #{spectator.url} yourself")
+end
+
+broadcast = lambda do |report: nil, final: false|
+  next unless spectator
+
+  update = RobotWars::SpectatorUpdate.new(game: game, roster: roster, log_lines: spectator_log,
+                                          events: report ? report.events : [], final: final)
+  spectator.publish(update.to_json)
 end
 
 # Resolve each warrior's "<provider>/<model id>" up front: --model wins
@@ -198,6 +212,8 @@ header = <<~HEADER
   warriors: #{warrior_ids.join(', ')}
 HEADER
 puts header
+spectator_log.concat(header.lines.map(&:chomp))
+broadcast.call
 announcer&.announce(header)
 
 last_report = nil
@@ -244,39 +260,22 @@ until game.over? || game.turn_number >= options[:max_turns]
       game.remove_robot(robot)
       obituary = "#{robot.id} is brain dead (no reply within #{options[:timeout]}s) — removed from the match"
       puts obituary
+      spectator_log << obituary
+      broadcast.call
       announcer&.announce(obituary)
     end
   end
   next if game.over?
 
-  # Origins must be read before resolution — afterward a robot may have
-  # moved, been displaced, or died off the board.
-  origins = actions.keys.to_h { |robot| [robot, game.occupancy.position_of(robot)] }
-
   report = game.play_turn(actions)
+  # The turn's story is the Report's own event stream, narrated by the
+  # one shared TurnNarrator — the browser's play-by-play panel shows
+  # these exact lines, so the two spectators can never disagree.
   recap = ["turn #{game.turn_number}: #{game.alive_robots.map { |r| "#{r.id}=#{r.life}" }.join(', ')}"]
-  # Recap what each warrior declared this turn — every robot that was
-  # alive when actions were collected, including any the turn just
-  # eliminated — then the conflicts those declarations caused, in the
-  # order they resolve: rule 21 solo conflicts during the movement
-  # phase, then the square conflicts.
-  actions.each do |robot, action|
-    line = "  #{robot.id}: #{action.describe(origins.fetch(robot))}"
-    owned = report.claimed_squares_for(robot).map { |square| "(#{square.x},#{square.y})" }
-    line << " — now owns #{owned.join(', ')}" unless owned.empty?
-    recap << line
-  end
-  (report.solo_conflicts + report.conflicts).each { |conflict| recap << "  #{conflict}" }
-  # Ranged shots resolve last; show each attacker's Battleship-style
-  # outcome (the same feedback its next sensing report will carry).
-  actions.each_key do |robot|
-    case report.attack_outcome_for(robot)
-    in nil then nil
-    in :off_board then recap << "  #{robot.id}'s attack was OFF THE BOARD"
-    in outcome then recap << "  #{robot.id}'s attack was a #{outcome.to_s.upcase}"
-    end
-  end
+  RobotWars::TurnNarrator.new(report: report).lines.each { |line| recap << "  #{line}" }
   puts recap
+  spectator_log.concat(recap)
+  broadcast.call(report: report)
   announcer&.announce(recap.join("\n"))
   last_report = report
 end
@@ -290,4 +289,9 @@ finale = if game.tie?
          end
 puts "---"
 puts finale
+spectator_log << "---" << finale
+broadcast.call(final: true)
 announcer&.announce(finale)
+# Drains every spectator's queue (the final update included) before the
+# process goes away; the finished page stays on screen in the browser.
+spectator&.stop
