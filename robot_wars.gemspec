@@ -12,7 +12,7 @@ Gem::Specification.new do |spec|
                      "and the last robot remaining wins."
   spec.homepage = "https://github.com/MadBomber/robot_wars"
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 3.2.0"
+  spec.required_ruby_version = ">= 3.4.0"
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = "https://github.com/MadBomber/robot_wars"
   spec.metadata["changelog_uri"] = "https://github.com/MadBomber/robot_wars/blob/main/CHANGELOG.md"
@@ -31,5 +31,5 @@ Gem::Specification.new do |spec|
   spec.executables = spec.files.grep(%r{\Abin/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "robot_lab", "~> 0.2"
+  spec.add_dependency "robot_lab", "~> 0.3"
 end
