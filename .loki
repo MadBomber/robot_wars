@@ -1,10 +1,136 @@
 # frozen_string_literal: true
 # robot_wars — turn-based last-robot-standing game on a 2D grid board.
 
+require "json"
+require "net/http"
+require "shellwords"
+
 import_up "repo_dev.loki"
 
 class Tasks
   @@gem_name ||= "robot_wars".freeze
 
   header "robot_wars v#{gem_version} — last robot standing"
+
+  APFEL_URL   = "http://127.0.0.1:11434/v1/models"
+  LMS_URL     = "http://127.0.0.1:1234/v1/models"
+  SERVER_WAIT = 30 # seconds a freshly started server gets to answer
+
+  # LM Studio's server runs inside its daemon, so `lms server start` returns
+  # at once. This keeps a foreground process for the job to own: it streams
+  # the server's traffic into the job log, and `asgard jobs stop` (TERM to
+  # the job's process group) stops the server on its way out.
+  LMS_JOB = <<~SHELL
+    lms server start
+    trap 'lms server stop; exit 0' TERM INT
+    lms log stream &
+    wait
+  SHELL
+
+  # Both servers are asgard background jobs (`asgard jobs list`), named
+  # apfel and lms. They outlive the match; stop them together with
+  # `asgard jobs stop servers`. A server that already answers, however it
+  # was started, is left alone.
+  desc "apfel", "Start the apfel server (Apple's on-device model, port 11434) as background job apfel"
+  def apfel = start_server(:apfel, "apfel --serve", APFEL_URL)
+
+  desc "lms", "Start the LM Studio server (port 1234) as background job lms"
+  def lms = start_server(:lms, LMS_JOB, LMS_URL)
+
+  desc "servers", "Start the apfel and LM Studio servers"
+  depends_on %i[apfel lms]
+  def servers = nil
+
+  # Everything after `play` goes to bin/rwars untouched, options included:
+  #   asgard play --size 12x12 --announcer --browser
+  stop_on_unknown_option! :play
+
+  desc "play [RWARS_OPTIONS]", "Start both servers, load the LM Studio models the match needs, and run bin/rwars"
+  depends_on :servers
+  def play(*rwars_args)
+    lms_models(match_models(rwars_args)).each { |model| load_lms_model(model) }
+    sh "bundle exec bin/rwars #{rwars_args.shelljoin}"
+  end
+
+  no_commands do
+    # Starts +script+ as background job +job+ unless +url+ already answers,
+    # then waits for it to.
+    def start_server(job, script, url)
+      return say("#{job}: already running", :green) if server_up?(url)
+
+      sh script, background: job
+      answers_within?(url) or abort "#{job} did not answer within #{SERVER_WAIT}s; see `asgard jobs log #{job}`"
+      say "#{job}: started", :green
+    end
+
+    # Loads an LM Studio model unless it is already loaded.
+    def load_lms_model(model, loaded = loaded_lms_models)
+      return say("#{model} already loaded", :green) if loaded.include?(model)
+
+      sh "lms load #{model.shellescape} -y"
+    end
+
+    def loaded_lms_models
+      out = `lms ps --json 2>/dev/null`
+      JSON.parse(out).flat_map { |m| [m["identifier"], m["modelKey"]] }.compact.uniq
+    rescue JSON::ParserError
+      []
+    end
+
+    # Every "<provider>/<model>" the match will use, read the way bin/rwars
+    # reads it: --model overrides every warrior; otherwise each warrior's
+    # front matter in --warriors DIR (default examples/warriors), skipping
+    # "_" files. --announcer [FILE] (default examples/warriors/_announcer.md)
+    # adds the announcer's model.
+    def match_models(args, default_dir = "examples/warriors")
+      dir    = option_value(args, "-w", "--warriors") || default_dir
+      forced = option_value(args, "--model")
+      warriors = Dir.glob(File.join(dir, "*.md")).reject { File.basename(it).start_with?("_") }
+      models = forced ? [forced] : warriors.filter_map { front_matter_model(it) }
+      if (index = args.index("--announcer"))
+        file = args[index + 1]
+        file = File.join(default_dir, "_announcer.md") if file.nil? || file.start_with?("-")
+        models << front_matter_model(file)
+      end
+      models.compact.uniq
+    end
+
+    # The bare model ids of the lms/ entries in +models+.
+    def lms_models(models) = models.filter_map { it.delete_prefix("lms/") if it.start_with?("lms/") }
+
+    # The value after the first of +flags+ in +args+ ("--flag value" or "--flag=value").
+    def option_value(args, *flags)
+      args.each_with_index do |arg, i|
+        flags.each do |flag|
+          return args[i + 1] if arg == flag
+          return arg.delete_prefix("#{flag}=") if arg.start_with?("#{flag}=")
+        end
+      end
+      nil
+    end
+
+    # The `model:` line of a template's YAML front matter, or nil.
+    def front_matter_model(path)
+      return nil unless File.file?(path)
+
+      front = File.read(path)[/\A---\s*\n(.*?)\n---/m, 1]
+      front && front[/^model:\s*(\S+)/, 1]
+    end
+
+    def server_up?(url)
+      Net::HTTP.get_response(URI(url)).is_a?(Net::HTTPSuccess)
+    rescue SystemCallError, IOError, Net::OpenTimeout, Net::ReadTimeout
+      false
+    end
+
+    def answers_within?(url, seconds = SERVER_WAIT)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+      until server_up?(url)
+        return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+        sleep 0.5
+      end
+      true
+    end
+  end
 end
