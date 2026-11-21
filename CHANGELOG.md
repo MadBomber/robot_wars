@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Minimum Ruby raised to 4.0.9.** `required_ruby_version` is now `>= 4.0.9` (was `>= 3.4.0`), and a `.ruby-version` file pins development to 4.0.9.
+- **Requires robot_lab 0.6.2 or newer** (`~> 0.6`, `>= 0.6.2`; was `~> 0.3`), which brings ruby_llm 2.2. No code changes were needed: `RobotLab.build` with `template:`/`system_prompt:`/`model:`/`provider:` and `run(...).reply` behave as before.
+
 - Rule 47 (ruled by Dewayne): the board is a standard math plot —
   square (0,0) is the southwest corner, x grows east, y grows north,
   so `MOVE north` lands on (x, y+1). `Direction`'s y-axis flipped
