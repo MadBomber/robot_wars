@@ -263,19 +263,21 @@ until game.over? || game.turn_number >= options[:max_turns]
   story = []
   threads.each do |robot, thread|
     remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    if thread.join([remaining, 0].max)
-      begin
-        actions[robot] = thread.value
-      rescue StandardError => e
-        abort "error: #{robot.id}'s brain failed to respond (#{e.class}: #{e.message})"
-      end
-    else
-      thread.kill
-      game.remove_robot(robot)
-      # Told with this turn's story at the sync point below, not here —
-      # the previous turn's call may still be on the air.
-      story << "#{robot.id} is brain dead (no reply within #{options[:timeout]}s) — removed from the match"
+    # Thread#join (not just #value) re-raises a failed brain's exception,
+    # so the rescue has to cover the join too.
+    begin
+      answered = thread.join([remaining, 0].max)
+      actions[robot] = thread.value if answered
+    rescue StandardError => e
+      abort "error: #{robot.id}'s brain failed to respond (#{e.class}: #{e.message})"
     end
+    next if answered
+
+    thread.kill
+    game.remove_robot(robot)
+    # Told with this turn's story at the sync point below, not here —
+    # the previous turn's call may still be on the air.
+    story << "#{robot.id} is brain dead (no reply within #{options[:timeout]}s) — removed from the match"
   end
 
   report = nil
